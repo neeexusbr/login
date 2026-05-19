@@ -73,6 +73,25 @@ const Solicitacao = mongoose.model('Solicitacao', new mongoose.Schema({
   respondidoPor: { type: String, default: null } // quem respondeu
 }));
 
+// === MODELOS DE CHAT ===
+// Modelo para Mensagens Globais
+const MensagemGlobal = mongoose.model('MensagemGlobal', new mongoose.Schema({
+  usuario: { type: String, required: true },
+  mensagem: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now },
+  criada_em: { type: Date, default: Date.now }
+}));
+
+// Modelo para Mensagens Privadas
+const MensagemPrivada = mongoose.model('MensagemPrivada', new mongoose.Schema({
+  remetente: { type: String, required: true },
+  destinatario: { type: String, required: true },
+  mensagem: { type: String, required: true },
+  lida: { type: Boolean, default: false },
+  timestamp: { type: Date, default: Date.now },
+  criada_em: { type: Date, default: Date.now }
+}));
+
 // Cadastro
 // Registro
 app.post("/registrar", async (req, res) => {
@@ -1394,6 +1413,250 @@ app.post("/lootbox/abrir", autenticar, async (req, res) => {
       restantes: usuario.lootboxes[type]
     });
   } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
+// === SISTEMA DE CHAT ===
+
+// Obter mensagens globais (últimas 50)
+app.get("/chat/mensagens-globais", async (req, res) => {
+  try {
+    const mensagens = await MensagemGlobal.find({})
+      .sort({ timestamp: -1 })
+      .limit(50)
+      .lean();
+
+    // Reverter para ordem cronológica
+    const mensagensOrdenadas = mensagens.reverse();
+
+    console.log(`[CHAT-GLOBAL] Retornando ${mensagensOrdenadas.length} mensagens`);
+    res.json({ ok: true, mensagens: mensagensOrdenadas });
+  } catch (err) {
+    console.error('[CHAT-GLOBAL] Erro:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter mensagens: " + err.message });
+  }
+});
+
+// Enviar mensagem global (requer autenticação)
+app.post("/chat/enviar-global", autenticar, async (req, res) => {
+  try {
+    const { mensagem } = req.body;
+
+    if (!mensagem || mensagem.trim().length === 0) {
+      return res.status(400).json({ ok: false, mensagem: "Mensagem vazia!" });
+    }
+
+    if (mensagem.length > 500) {
+      return res.status(400).json({ ok: false, mensagem: "Mensagem muito longa (máx: 500 caracteres)!" });
+    }
+
+    const novaMensagem = new MensagemGlobal({
+      usuario: req.usuario.nome,
+      mensagem: mensagem.trim(),
+      timestamp: new Date()
+    });
+
+    await novaMensagem.save();
+
+    console.log(`[CHAT-GLOBAL] ${req.usuario.nome}: ${mensagem.substring(0, 50)}...`);
+
+    res.json({ 
+      ok: true, 
+      mensagem: "Mensagem enviada!",
+      dados: novaMensagem 
+    });
+  } catch (err) {
+    console.error('[CHAT-GLOBAL] Erro ao enviar:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao enviar mensagem: " + err.message });
+  }
+});
+
+// Enviar mensagem privada
+app.post("/chat/enviar-privada", autenticar, async (req, res) => {
+  try {
+    const { destinatario, mensagem } = req.body;
+
+    if (!destinatario || destinatario.trim().length === 0) {
+      return res.status(400).json({ ok: false, mensagem: "Destinatário inválido!" });
+    }
+
+    if (!mensagem || mensagem.trim().length === 0) {
+      return res.status(400).json({ ok: false, mensagem: "Mensagem vazia!" });
+    }
+
+    if (mensagem.length > 500) {
+      return res.status(400).json({ ok: false, mensagem: "Mensagem muito longa (máx: 500 caracteres)!" });
+    }
+
+    // Verificar se o destinatário existe
+    const usuarioDestino = await Usuario.findOne({ nome: destinatario });
+    if (!usuarioDestino) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário destinatário não encontrado!" });
+    }
+
+    // Não permitir enviar para si mesmo
+    if (req.usuario.nome === destinatario) {
+      return res.status(400).json({ ok: false, mensagem: "Você não pode enviar mensagens para si mesmo!" });
+    }
+
+    const novaMensagem = new MensagemPrivada({
+      remetente: req.usuario.nome,
+      destinatario: destinatario,
+      mensagem: mensagem.trim(),
+      lida: false,
+      timestamp: new Date()
+    });
+
+    await novaMensagem.save();
+
+    console.log(`[CHAT-PRIVADO] ${req.usuario.nome} -> ${destinatario}: ${mensagem.substring(0, 50)}...`);
+
+    res.json({ 
+      ok: true, 
+      mensagem: "Mensagem privada enviada!",
+      dados: novaMensagem 
+    });
+  } catch (err) {
+    console.error('[CHAT-PRIVADO] Erro ao enviar:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao enviar mensagem: " + err.message });
+  }
+});
+
+// Obter conversas privadas do usuário
+app.get("/chat/conversas-privadas", autenticar, async (req, res) => {
+  try {
+    // Encontrar todas as conversas (remetente ou destinatário)
+    const conversas = await MensagemPrivada.find({
+      $or: [
+        { remetente: req.usuario.nome },
+        { destinatario: req.usuario.nome }
+      ]
+    }).sort({ timestamp: -1 }).lean();
+
+    // Agrupar por usuário
+    const conversasAgrupadas = {};
+
+    conversas.forEach(msg => {
+      const ousuario = msg.remetente === req.usuario.nome ? msg.destinatario : msg.remetente;
+      
+      if (!conversasAgrupadas[ousuario]) {
+        conversasAgrupadas[ousuario] = {
+          usuario: ousuario,
+          ultimaMensagem: msg.mensagem,
+          timestamp: msg.timestamp,
+          naoLidas: 0
+        };
+      }
+
+      // Contar mensagens não lidas recebidas
+      if (msg.destinatario === req.usuario.nome && !msg.lida) {
+        conversasAgrupadas[ousuario].naoLidas += 1;
+      }
+    });
+
+    // Converter para array e ordenar por timestamp
+    const conversasArray = Object.values(conversasAgrupadas)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    console.log(`[CHAT] ${req.usuario.nome} tem ${conversasArray.length} conversas`);
+
+    res.json({ 
+      ok: true, 
+      conversas: conversasArray,
+      total: conversasArray.length
+    });
+  } catch (err) {
+    console.error('[CHAT] Erro ao obter conversas:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter conversas: " + err.message });
+  }
+});
+
+// Obter histórico de conversa privada com um usuário específico
+app.get("/chat/conversa-privada/:usuario", autenticar, async (req, res) => {
+  try {
+    const { usuario } = req.params;
+
+    const mensagens = await MensagemPrivada.find({
+      $or: [
+        { remetente: req.usuario.nome, destinatario: usuario },
+        { remetente: usuario, destinatario: req.usuario.nome }
+      ]
+    }).sort({ timestamp: 1 }).lean();
+
+    // Marcar como lidas as mensagens recebidas
+    await MensagemPrivada.updateMany(
+      {
+        remetente: usuario,
+        destinatario: req.usuario.nome,
+        lida: false
+      },
+      { lida: true }
+    );
+
+    console.log(`[CHAT] ${req.usuario.nome} abriu conversa com ${usuario} (${mensagens.length} mensagens)`);
+
+    res.json({ 
+      ok: true, 
+      mensagens: mensagens,
+      total: mensagens.length
+    });
+  } catch (err) {
+    console.error('[CHAT] Erro ao obter conversa:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter conversa: " + err.message });
+  }
+});
+
+// Contar mensagens privadas não lidas
+app.get("/chat/nao-lidas", autenticar, async (req, res) => {
+  try {
+    const count = await MensagemPrivada.countDocuments({
+      destinatario: req.usuario.nome,
+      lida: false
+    });
+
+    res.json({ 
+      ok: true, 
+      naoLidas: count,
+      temNotificacoes: count > 0
+    });
+  } catch (err) {
+    console.error('[CHAT] Erro ao contar não lidas:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
+// Deletar conversa privada (soft delete - não recomendado para chat)
+app.delete("/chat/conversa-privada/:usuario", autenticar, async (req, res) => {
+  try {
+    const { usuario } = req.params;
+
+    // Simplesmente retorna sucesso, mas em produção seria melhor não deletar
+    console.log(`[CHAT] ${req.usuario.nome} solicitou delete de conversa com ${usuario}`);
+
+    res.json({ 
+      ok: true, 
+      mensagem: "Operação realizada (histórico mantido no servidor)" 
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
+// Listar usuários online (todos os usuários existentes)
+app.get("/chat/usuarios-online", async (req, res) => {
+  try {
+    const usuarios = await Usuario.find({}, { nome: 1, foto_perfil: 1, tagPersonalizada: 1, _id: 0 })
+      .limit(50)
+      .lean();
+
+    res.json({ 
+      ok: true, 
+      usuarios: usuarios,
+      total: usuarios.length
+    });
+  } catch (err) {
+    console.error('[CHAT] Erro ao listar usuários:', err);
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
 });
