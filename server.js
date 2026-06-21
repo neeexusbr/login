@@ -222,32 +222,44 @@ app.get("/carregarBackup", autenticar, async (req, res) => {
       return res.json({ ok: false, dados: null, mensagem: "Nenhum backup encontrado." });
     }
 
-    // CORREÇÃO: Transforma o documento do Mongoose em um objeto JS puro para podermos acessar as chaves dinâmicas com segurança
+    // Transforma em objeto puro para garantir o acesso às propriedades dinâmicas
     const backupPuro = backup.toObject();
-    const conteudoDados = backupPuro.dados || {};
+    
+    // De acordo com o MongoDB Compass, o próprio 'backupPuro.dados' contém a estrutura direto:
+    const raizDoBackup = backupPuro.dados || {};
 
-    // Retornar estrutura otimizada extraindo do objeto puro
+    // Mapeia o retorno exatamente como o MongoDB está estruturado na imagem
     const dadosRetorno = {
-      dados: conteudoDados.dados || {},
-      achievements: conteudoDados.achievements || [],
-      unlockedGames: conteudoDados.unlockedGames || [],
-      purchasedItems: conteudoDados.purchasedItems || [],
-      purchasedItemsSpamton: conteudoDados.purchasedItemsSpamton || [], // Lembrar de adicionar a loja do Spamton aqui também!
-      preferences: conteudoDados.preferences || {},
-      timestamp: conteudoDados.timestamp || backup.atualizadoEm.toISOString()
+      // Se por acaso as moedas/playtime estiverem em uma subchave chamada 'dados', mantemos o fallback,
+      // caso contrário, puxamos as chaves simples que estão soltas na raiz (como userPlaytime, userTag, etc)
+      dados: raizDoBackup.dados || {
+        userCoins: raizDoBackup.userCoins,
+        userPlaytime: raizDoBackup.userPlaytime,
+        userTag: raizDoBackup.userTag,
+        userTagColor: raizDoBackup.userTagColor,
+        userTagColorType: raizDoBackup.userTagColorType,
+        userProfilePic: raizDoBackup.userProfilePic,
+        lastDailyRewardDate: raizDoBackup.lastDailyRewardDate
+      },
+      // CORREÇÃO CRÍTICA: Busca direto na raiz de onde estão no banco!
+      achievements: raizDoBackup.achievements || [],
+      unlockedGames: raizDoBackup.unlockedGames || [],
+      purchasedItems: raizDoBackup.purchasedItems || [],
+      purchasedItemsSpamton: raizDoBackup.purchasedItemsSpamton || [],
+      preferences: raizDoBackup.preferences || {},
+      timestamp: raizDoBackup.timestamp || backup.atualizadoEm.toISOString()
     };
 
     const tamanho = JSON.stringify(dadosRetorno).length;
     console.log(`[RESTORE] Usuário ${req.usuario.nome} - ${(tamanho/1024).toFixed(2)}KB`);
 
-    // Retorna a estrutura limpa para o front-end
+    // Retorna para o front-end
     res.json({ ok: true, dados: dadosRetorno });
   } catch (err) {
     console.error("Erro ao carregar backup:", err);
     res.status(500).json({ ok: false, mensagem: "Erro ao carregar backup: " + err.message });
   }
 });
-
 // === ROTAS DE ADMIN ===
 function verificarAdmin(req, res, next) {
   if (!req.usuario || !req.usuario.isAdmin) {
