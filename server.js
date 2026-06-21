@@ -737,7 +737,7 @@ app.post("/admin/emergencia-reset", autenticar, verificarYohanan, async (req, re
 // === ENDPOINTS DE LEADERBOARD ===
 app.get("/leaderboard", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, _id: 0 })
       .sort({ tempo_jogo: -1 })
       .limit(10)
       .lean(); // Converter para objeto puro do JavaScript
@@ -760,6 +760,7 @@ app.get("/leaderboard", async (req, res) => {
         tipoCorTag: user.tipoCorTag || 'comum',
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
+        rank: user.rank || 1,
         premio: premio,
         posicao: index + 1
       };
@@ -776,7 +777,7 @@ app.get("/leaderboard", async (req, res) => {
 // === LEADERBOARD DE MOEDAS ===
 app.get("/leaderboard/moedas", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, _id: 0 })
       .sort({ moedas: -1 })
       .limit(10)
       .lean();
@@ -799,6 +800,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
         tipoCorTag: user.tipoCorTag || 'comum',
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
+        rank: user.rank || 1,
         premio: premio,
         posicao: index + 1
       };
@@ -815,7 +817,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
 // === LEADERBOARD DE GIROS ===
 app.get("/leaderboard/giros", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, _id: 0 })
       .sort({ spins: -1 })
       .limit(10)
       .lean();
@@ -839,6 +841,7 @@ app.get("/leaderboard/giros", async (req, res) => {
         tipoCorTag: user.tipoCorTag || 'comum',
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
+        rank: user.rank || 1,
         premio: premio,
         posicao: index + 1
       };
