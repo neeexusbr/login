@@ -36,6 +36,9 @@ const Usuario = mongoose.model('Usuario', new mongoose.Schema({
   foto_perfil: { type: String, default: '' },
   corBordaPerfil: { type: String, default: '#ffd700' }, // cor da borda do perfil
   idCorBordaPerfil: { type: String, default: 'gold' }, // id da cor de borda selecionada
+  rank: { type: Number, default: 1 }, // Rank do usuário (1-30)
+  xp: { type: Number, default: 0 }, // Experiência atual do usuário
+  premiumXp: { type: Boolean, default: false } // Premium: dobra XP ganhado
 }));
 
 // Modelo Backup
@@ -989,6 +992,105 @@ app.get("/achievements-usuario", autenticar, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro ao obter achievements: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA OBTER RANK E XP ===
+app.get("/rank-xp", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome }, { rank: 1, xp: 1, premiumXp: 1, _id: 0 });
+    
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+    
+    res.json({ 
+      ok: true, 
+      rank: usuario.rank || 1,
+      xp: usuario.xp || 0,
+      premium: usuario.premiumXp || false
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter rank: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA ATUALIZAR XP ===
+app.post("/atualizar-xp", autenticar, async (req, res) => {
+  try {
+    const { quantidade } = req.body;
+    
+    if (!quantidade || quantidade <= 0) {
+      return res.status(400).json({ ok: false, mensagem: "Quantidade de XP inválida!" });
+    }
+    
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+    
+    // Aplicar multiplicador Premium (2x)
+    let xpGanho = quantidade;
+    if (usuario.premiumXp) {
+      xpGanho = quantidade * 2;
+    }
+    
+    usuario.xp = (usuario.xp || 0) + xpGanho;
+    
+    // Definir XP máximo por rank (XP necessário para passar de rank)
+    const xpPorRank = [
+      0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600, 11700,
+      14000, 16500, 19200, 22100, 25200, 28500, 32000, 35700, 39600, 43700,
+      48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
+    ];
+    
+    // Verificar se subiu de rank
+    while (usuario.rank < 30 && usuario.xp >= xpPorRank[usuario.rank + 1]) {
+      usuario.rank++;
+    }
+    
+    // Capped at rank 30
+    if (usuario.rank > 30) usuario.rank = 30;
+    if (usuario.xp > 102000) usuario.xp = 102000; // XP máximo ao alcançar rank 30
+    
+    await usuario.save();
+    
+    res.json({ 
+      ok: true, 
+      rank: usuario.rank,
+      xp: usuario.xp,
+      xpGanho: xpGanho,
+      premium: usuario.premiumXp,
+      mensagem: `XP atualizado! Rank: ${usuario.rank}/30${usuario.premiumXp ? ' [2x Premium]' : ''}`
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao atualizar XP: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA ATIVAR PREMIUM XP ===
+app.post("/ativar-premium", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    if (usuario.premiumXp) {
+      return res.json({ ok: true, mensagem: "Você já possui Premium XP!", premium: true });
+    }
+
+    usuario.premiumXp = true;
+    await usuario.save();
+
+    console.log(`[PREMIUM] ${req.usuario.nome} ativou Premium XP`);
+    res.json({ 
+      ok: true, 
+      premium: true,
+      mensagem: "✨ Premium XP ativado! Você ganha 2x XP a partir de agora!" 
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao ativar Premium: " + err.message });
   }
 });
 
