@@ -953,6 +953,45 @@ app.get("/itens-comprados", autenticar, async (req, res) => {
   }
 });
 
+// === ENDPOINT PARA OBTER JOGOS SECRETOS ===
+app.get("/jogos-secretos", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome }, { jogosSecretos: 1, _id: 0 });
+    
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+    
+    res.json({ 
+      ok: true, 
+      jogosSecretos: usuario.jogosSecretos || []
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter jogos secretos: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA OBTER ACHIEVEMENTS ===
+app.get("/achievements-usuario", autenticar, async (req, res) => {
+  try {
+    const backup = await Backup.findOne({ usuario: req.usuario.nome }, { "dados.achievements": 1, _id: 0 });
+    
+    if (!backup || !backup.dados) {
+      return res.json({ 
+        ok: true, 
+        achievements: []
+      });
+    }
+    
+    res.json({ 
+      ok: true, 
+      achievements: backup.dados.achievements || []
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter achievements: " + err.message });
+  }
+});
+
 // === ENDPOINT PARA SINCRONIZAR MOEDAS ===
 app.post("/sincronizar-moedas", autenticar, async (req, res) => {
   try {
