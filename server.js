@@ -862,7 +862,8 @@ app.get("/leaderboard/rank", async (req, res) => {
         idCorBordaPerfil: 1, 
         tempo_jogo: 1, 
         rank: 1, 
-        xp: 1, // <--- Incluído aqui
+        xp: 1,
+        itensComprados: 1,
         _id: 0 
       })
       .sort({ xp: -1 }) // <--- Alterado de rank para xp
@@ -889,6 +890,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
         xp: user.xp || 0, // <--- Incluído no retorno para o front-end conseguir exibir
+        hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
         posicao: index + 1
       };
