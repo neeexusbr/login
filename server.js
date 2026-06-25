@@ -812,7 +812,7 @@ app.get("/leaderboard", async (req, res) => {
   try {
     const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, itensComprados: 1, _id: 0 })
       .sort({ tempo_jogo: -1 })
-      .limit(10)
+      .limit(20)
       .lean(); // Converter para objeto puro do JavaScript
 
     // Distribuir prêmios
@@ -821,7 +821,7 @@ app.get("/leaderboard", async (req, res) => {
       if (index === 0) premio = 10000;
       else if (index === 1) premio = 5000;
       else if (index === 2) premio = 2000;
-      else if (index >= 3 && index <= 9) premio = 1500;
+      else if (index >= 3 && index <= 19) premio = 1500;
 
       return {
         nome: user.nome,
@@ -868,7 +868,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         _id: 0 
       })
       .sort({ xp: -1 }) // <--- Alterado de rank para xp
-      .limit(10)
+      .limit(20)
       .lean();
 
     // Distribuir prêmios baseado no rank de XP
@@ -877,7 +877,7 @@ app.get("/leaderboard/rank", async (req, res) => {
       if (index === 0) premio = 5000;
       else if (index === 1) premio = 3000;
       else if (index === 2) premio = 1000;
-      else if (index >= 3 && index <= 9) premio = 500;
+      else if (index >= 3 && index <= 19) premio = 500;
 
       return {
         nome: user.nome,
@@ -909,7 +909,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
   try {
     const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, itensComprados: 1, _id: 0 })
       .sort({ moedas: -1 })
-      .limit(10)
+      .limit(20)
       .lean();
 
     // Distribuir prêmios baseado em moedas
@@ -918,7 +918,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
       if (index === 0) premio = 5000;
       else if (index === 1) premio = 3000;
       else if (index === 2) premio = 1000;
-      else if (index >= 3 && index <= 9) premio = 500;
+      else if (index >= 3 && index <= 19) premio = 500;
 
       return {
         nome: user.nome,
@@ -950,7 +950,7 @@ app.get("/leaderboard/giros", async (req, res) => {
   try {
     const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, itensComprados: 1, _id: 0 })
       .sort({ spins: -1 })
-      .limit(10)
+      .limit(20)
       .lean();
 
     // Distribuir prêmios baseado em giros
@@ -959,7 +959,7 @@ app.get("/leaderboard/giros", async (req, res) => {
       if (index === 0) premio = 20;
       else if (index === 1) premio = 15;
       else if (index === 2) premio = 10;
-      else if (index >= 3 && index <= 9) premio = 5;
+      else if (index >= 3 && index <= 19) premio = 5;
 
       return {
         nome: user.nome,
