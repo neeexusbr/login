@@ -906,7 +906,7 @@ app.get("/leaderboard/rank", async (req, res) => {
 // === LEADERBOARD DE MOEDAS ===
 app.get("/leaderboard/moedas", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, itensComprados: 1, _id: 0 })
       .sort({ moedas: -1 })
       .limit(10)
       .lean();
@@ -947,7 +947,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
 // === LEADERBOARD DE GIROS ===
 app.get("/leaderboard/giros", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, itensComprados: 1, _id: 0 })
       .sort({ spins: -1 })
       .limit(10)
       .lean();
