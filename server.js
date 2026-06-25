@@ -930,6 +930,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
+        hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
         posicao: index + 1
       };
@@ -971,6 +972,7 @@ app.get("/leaderboard/giros", async (req, res) => {
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
+        hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
         posicao: index + 1
       };
