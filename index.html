@@ -523,6 +523,7 @@ document.getElementById("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
   const nome = e.target.nome.value.trim();
   const senha = e.target.senha.value;
+  submitAnimation();
   const resposta = await enviarDados(`${API_URL}/login`, { nome, senha });
 
   alert(resposta.mensagem); // mostra a mensagem do servidor
@@ -554,6 +555,7 @@ async function enviarDados(url, dados) {
   // Mostrar quem está logado (sem alert)
   const usuario = localStorage.getItem("usuarioLogado");
   const token = localStorage.getItem("token")
+  if (!window.location.href.toLowerCase().includes('file://')) {
   if (usuario && token) {
     const boolean = confirm("Parece que você já está logado, quer sair?")
     if (boolean == true) {
@@ -565,6 +567,7 @@ async function enviarDados(url, dados) {
    localStorage.clear("usuarioLogado")
    localStorage.clear("token")
   }
+}
 </script>
 
 </body>

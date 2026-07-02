@@ -40,6 +40,12 @@ const Usuario = mongoose.model('Usuario', new mongoose.Schema({
   rank: { type: Number, default: 1 }, // Rank do usuário (1-30)
   xp: { type: Number, default: 0 }, // Experiência atual do usuário
   premiumXp: { type: Boolean, default: false } // Premium: dobra XP ganhado
+  ,
+  pendingAlert: {
+    title: { type: String, default: '' },
+    message: { type: String, default: '' },
+    createdAt: { type: Date, default: null }
+  }
 }));
 
 // Modelo Backup
@@ -169,8 +175,28 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ ok: false, mensagem: "Senha incorreta!" });
     }
 
+    // Validar rank e XP ao fazer login
+    const validacaoRank = await validarRankXP(usuario);
+    
+    // Se houve reset ou correção, registrar no log
+    if (!validacaoRank.valido) {
+      if (validacaoRank.resetado) {
+        console.log(`[LOGIN-PROTECTION] Reset de rank para ${nome} ao fazer login`);
+      } else {
+        console.log(`[LOGIN-PROTECTION] Rank corrigido para ${nome} ao fazer login`);
+      }
+    }
+
     const token = jwt.sign({ nome: usuario.nome, isAdmin: usuario.isAdmin }, SECRET, { expiresIn: "30d" });
-    res.json({ ok: true, mensagem: "Login realizado com sucesso!", token, isAdmin: usuario.isAdmin });
+    res.json({ 
+      ok: true, 
+      mensagem: validacaoRank.resetado 
+        ? "Login realizado! ⚠️ Seu rank foi resetado por inconsistência." 
+        : "Login realizado com sucesso!", 
+      token, 
+      isAdmin: usuario.isAdmin,
+      rankAjustado: !validacaoRank.valido
+    });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro no login: " + err.message });
   }
@@ -912,6 +938,89 @@ app.post("/admin/emergencia-reset", autenticar, verificarDogue, async (req, res)
   }
 });
 
+// === VALIDAÇÃO DE RANK EM MASSA (apenas Dogue) ===
+app.post("/admin/validar-todos-ranks", autenticar, verificarDogue, async (req, res) => {
+  try {
+    const usuarios = await Usuario.find({});
+    let resetados = 0;
+    let corrigidos = 0;
+    let validos = 0;
+    const relatorio = [];
+
+    for (const usuario of usuarios) {
+      const validacao = await validarRankXP(usuario);
+      
+      if (!validacao.valido) {
+        if (validacao.resetado) {
+          resetados++;
+          relatorio.push(`❌ ${usuario.nome}: Rank resetado de ${usuario.rank} para 1 (XP era ${usuario.xp})`);
+        } else {
+          corrigidos++;
+          relatorio.push(`⚠️ ${usuario.nome}: Rank corrigido de ${usuario.rank} para ${validacao.novoRank}`);
+        }
+      } else {
+        validos++;
+      }
+    }
+
+    console.log(`[VALIDAÇÃO-MASSA] Dogue executou validação de rank em massa`);
+    console.log(`[VALIDAÇÃO-MASSA] Válidos: ${validos}, Corrigidos: ${corrigidos}, Resetados: ${resetados}`);
+
+    res.json({ 
+      ok: true, 
+      mensagem: `✅ Validação concluída! Válidos: ${validos}, Corrigidos: ${corrigidos}, Resetados: ${resetados}`,
+      estatisticas: {
+        validos,
+        corrigidos,
+        resetados,
+        total: usuarios.length
+      },
+      relatorio: relatorio.slice(0, 50) // Limitar a 50 primeiros para não ficar muito grande
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
+// === RESETAR RANK E XP DE UM USUÁRIO (apenas Dogue) ===
+app.post("/admin/resetar-rank-usuario", autenticar, verificarDogue, async (req, res) => {
+  try {
+    const { nomeUsuario } = req.body;
+
+    if (!nomeUsuario) {
+      return res.status(400).json({ ok: false, mensagem: "Nome do usuário é obrigatório!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    const rankAnterior = usuario.rank;
+    const xpAnterior = usuario.xp;
+
+    usuario.rank = 1;
+    usuario.xp = 0;
+    await usuario.save();
+
+    console.log(`[RANK-RESET] Dogue resetou rank de ${nomeUsuario}: Rank ${rankAnterior}/XP ${xpAnterior} → Rank 1/XP 0`);
+
+    res.json({ 
+      ok: true, 
+      mensagem: `✅ Rank de ${nomeUsuario} foi resetado para Rank 1, XP 0`,
+      usuarioInfo: {
+        nome: nomeUsuario,
+        rankAnterior,
+        xpAnterior,
+        novoRank: 1,
+        novoXP: 0
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
 // === ROTAS DE HEAD ADMIN ===
 // Promover Admin a Head Admin (apenas Dogue)
 app.post("/admin/promover-head-admin", autenticar, verificarDogue, async (req, res) => {
@@ -1342,7 +1451,146 @@ app.get("/achievements-usuario", autenticar, async (req, res) => {
   }
 });
 
-// === ENDPOINT PARA OBTER RANK E XP ===
+// === FUNÇÃO AUXILIAR: Validar Rank contra XP ===
+function calcularRankComBase(xp) {
+  const xpPorRank = [
+    0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600, 11700,
+    14000, 16500, 19200, 22100, 25200, 28500, 32000, 35700, 39600, 43700,
+    48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
+  ];
+  
+  let rank = 1;
+  for (let i = 1; i < xpPorRank.length; i++) {
+    if (xp >= xpPorRank[i]) {
+      rank = i + 1;
+    } else {
+      break;
+    }
+  }
+  
+  return Math.min(rank, 30); // Máximo rank 30
+}
+
+async function validarRankXP(usuario) {
+  // XP necessário para cada rank
+  const xpPorRank = [
+    0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600, 11700,
+    14000, 16500, 19200, 22100, 25200, 28500, 32000, 35700, 39600, 43700,
+    48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
+  ];
+
+  const xpAtual = usuario.xp || 0;
+  const rankAtual = usuario.rank || 1;
+  
+  // Verificar qual rank o usuário deveria ter baseado no XP
+  let rankCalculado = 1;
+  for (let i = 1; i < xpPorRank.length; i++) {
+    if (xpAtual >= xpPorRank[i]) {
+      rankCalculado = i + 1;
+    } else {
+      break;
+    }
+  }
+  
+  rankCalculado = Math.min(rankCalculado, 30);
+  
+  // Validar inconsistência: rank não corresponde ao XP
+  if (rankAtual > rankCalculado) {
+    // Rank está muito alto para o XP que tem
+    console.log(`[RANK-PROTECTION] ⚠️ Rank inválido detectado para ${usuario.nome}: Rank ${rankAtual} mas XP ${xpAtual} corresponde ao rank ${rankCalculado}`);
+    
+    // Resetar rank e XP para proteção
+    usuario.rank = 1;
+    usuario.xp = 0;
+    await usuario.save();
+    
+    console.log(`[RANK-PROTECTION] ✅ Reset realizado para ${usuario.nome}: Rank 1, XP 0`);
+    
+    return {
+      valido: false,
+      resetado: true,
+      motivoReset: `Rank ${rankAtual} não correspondia ao XP ${xpAtual}`,
+      novoRank: 1,
+      novoXP: 0
+    };
+  }
+  
+  // Se rank está baixo demais para o XP, ajustar para cima automaticamente
+  if (rankAtual < rankCalculado) {
+    console.log(`[RANK-PROTECTION] ⚠️ Rank baixo demais para ${usuario.nome}: Rank ${rankAtual} mas XP ${xpAtual} permite rank ${rankCalculado}`);
+    
+    // Atualizar rank para corresponder ao XP
+    usuario.rank = rankCalculado;
+    await usuario.save();
+    
+    console.log(`[RANK-PROTECTION] ✅ Rank corrigido para ${usuario.nome}: Rank ${rankCalculado}`);
+    
+    return {
+      valido: false,
+      resetado: false,
+      motivoCorrecao: `Rank ${rankAtual} foi atualizado para ${rankCalculado} para corresponder ao XP`,
+      novoRank: rankCalculado,
+      novoXP: xpAtual
+    };
+  }
+  
+  // Rank está correto
+  return {
+    valido: true,
+    resetado: false,
+    motivoCorrecao: null,
+    rank: rankAtual,
+    xp: xpAtual
+  };
+}
+
+// === ENDPOINT PARA VALIDAR RANK E XP ===
+app.post("/validar-rank-xp", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+    
+    const resultado = await validarRankXP(usuario);
+    
+    if (!resultado.valido) {
+      if (resultado.resetado) {
+        return res.json({ 
+          ok: true, 
+          valido: false,
+          resetado: true,
+          mensagem: `❌ Inconsistência detectada! Seu rank não correspondia ao XP. Sistema resetou para Rank 1 e XP 0 por proteção.`,
+          detalhes: resultado.motivoReset,
+          rank: resultado.novoRank,
+          xp: resultado.novoXP
+        });
+      } else {
+        return res.json({ 
+          ok: true, 
+          valido: false,
+          corrigido: true,
+          mensagem: `⚠️ Rank foi corrigido! ${resultado.motivoCorrecao}`,
+          rank: resultado.novoRank,
+          xp: resultado.novoXP
+        });
+      }
+    }
+    
+    res.json({ 
+      ok: true, 
+      valido: true,
+      mensagem: "✅ Rank e XP estão consistentes!",
+      rank: resultado.rank,
+      xp: resultado.xp
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao validar rank: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA OBTER RANK E XP (COM VALIDAÇÃO AUTOMÁTICA) ===
 app.get("/rank-xp", autenticar, async (req, res) => {
   try {
     const usuario = await Usuario.findOne({ nome: req.usuario.nome }, { rank: 1, xp: 1, premiumXp: 1, _id: 0 });
@@ -1351,11 +1599,20 @@ app.get("/rank-xp", autenticar, async (req, res) => {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
     
+    // Validar rank automaticamente ao carregar
+    const usuarioCompleto = await Usuario.findOne({ nome: req.usuario.nome });
+    const validacao = await validarRankXP(usuarioCompleto);
+    
+    const rank = validacao.rank || usuarioCompleto.rank || 1;
+    const xp = validacao.xp || usuarioCompleto.xp || 0;
+    
     res.json({ 
       ok: true, 
-      rank: usuario.rank || 1,
-      xp: usuario.xp || 0,
-      premium: usuario.premiumXp || false
+      rank: rank,
+      xp: xp,
+      premium: usuario.premiumXp || false,
+      validado: validacao.valido,
+      aviso: validacao.resetado ? "Rank foi resetado por inconsistência!" : (validacao.motivoCorrecao ? validacao.motivoCorrecao : null)
     });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro ao obter rank: " + err.message });
@@ -2162,4 +2419,52 @@ app.get("/chat/usuarios-online", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);
+});
+
+// === ADMIN: Alertar usuário (cria um popup que aparecerá na próxima visita do usuário)
+app.post("/admin/alertar-usuario", autenticar, verificarAdmin, async (req, res) => {
+  try {
+    const { nomeUsuario, title, message } = req.body;
+    if (!nomeUsuario) return res.status(400).json({ ok: false, mensagem: "Informe o nome do usuário." });
+
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!usuario) return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+
+    usuario.pendingAlert = {
+      title: String(title || '').slice(0, 200),
+      message: String(message || '').slice(0, 2000),
+      createdAt: new Date()
+    };
+
+    await usuario.save();
+
+    console.log(`[ALERT-ADMIN] ${req.usuario.nome} enviou alerta para ${nomeUsuario}`);
+    res.json({ ok: true, mensagem: `Alerta enviado para ${nomeUsuario}!` });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao enviar alerta: " + err.message });
+  }
+});
+
+// Endpoint para o usuário obter e limpar o alerta pendente (aparece uma vez na próxima visita)
+app.get("/user/alerts", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+
+    const alert = usuario.pendingAlert && (usuario.pendingAlert.title || usuario.pendingAlert.message)
+      ? {
+          title: usuario.pendingAlert.title || '',
+          message: usuario.pendingAlert.message || '',
+          createdAt: usuario.pendingAlert.createdAt || null
+        }
+      : null;
+
+    // Limpar o alerta após ler (aparece apenas uma vez)
+    usuario.pendingAlert = { title: '', message: '', createdAt: null };
+    await usuario.save();
+
+    res.json({ ok: true, alert });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter alertas: " + err.message });
+  }
 });
