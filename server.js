@@ -1397,14 +1397,21 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
       48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
     ];
     
-    // Verificar se subiu de rank
+    // Verificar se subiu de rank e resetar XP para o novo rank
     while (usuario.rank < 30 && usuario.xp >= xpPorRank[usuario.rank + 1]) {
+      // Subtrair o XP necessário para passar de rank
+      usuario.xp -= xpPorRank[usuario.rank + 1];
       usuario.rank++;
     }
     
-    // Capped at rank 30
-    if (usuario.rank > 30) usuario.rank = 30;
-    if (usuario.xp > 102000) usuario.xp = 102000; // XP máximo ao alcançar rank 30
+    // Capped at rank 30 - manter XP entre 0 e o XP necessário para rank 30
+    if (usuario.rank > 30) {
+      usuario.rank = 30;
+      usuario.xp = Math.min(usuario.xp, xpPorRank[30]); // XP máximo ao alcançar rank 30
+    }
+    
+    // Garantir que XP nunca seja negativo
+    if (usuario.xp < 0) usuario.xp = 0;
     
     await usuario.save();
     
@@ -2163,6 +2170,72 @@ app.get("/chat/usuarios-online", async (req, res) => {
   } catch (err) {
     console.error('[CHAT] Erro ao listar usuários:', err);
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
+// === MIGRAÇÃO: Corrigir XP de todos os usuários (apenas Dogue) ===
+app.post("/admin/migrar-xp-fix", autenticar, verificarDogue, async (req, res) => {
+  try {
+    const xpPorRank = [
+      0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600, 11700,
+      14000, 16500, 19200, 22100, 25200, 28500, 32000, 35700, 39600, 43700,
+      48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
+    ];
+
+    const usuarios = await Usuario.find({});
+    let corrigidos = 0;
+    let erros = 0;
+
+    for (const usuario of usuarios) {
+      try {
+        let novoRank = 1;
+        let novoXp = usuario.xp || 0;
+
+        // Recalcular o rank baseado no XP total
+        for (let rank = 1; rank < 30; rank++) {
+          if (novoXp >= xpPorRank[rank + 1]) {
+            novoRank = rank + 1;
+          } else {
+            break;
+          }
+        }
+
+        // Calcular XP relativo ao rank atual
+        if (novoRank > 1) {
+          novoXp = novoXp - xpPorRank[novoRank];
+        }
+
+        // Garantir que XP está no intervalo correto
+        if (novoRank === 30) {
+          novoXp = Math.min(novoXp, xpPorRank[30] - xpPorRank[29]); // XP máximo para rank 30
+        }
+
+        // Só atualizar se houve mudança
+        if (usuario.rank !== novoRank || usuario.xp !== novoXp) {
+          usuario.rank = novoRank;
+          usuario.xp = Math.max(0, novoXp); // Nunca negativo
+          await usuario.save();
+          corrigidos++;
+          
+          console.log(`[MIGRAÇÃO] ${usuario.nome}: Rank ${usuario.rank} com XP ${usuario.xp}`);
+        }
+      } catch (err) {
+        console.error(`[MIGRAÇÃO-ERRO] ${usuario.nome}:`, err.message);
+        erros++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      mensagem: `✅ Migração concluída!`,
+      corrigidos: corrigidos,
+      erros: erros,
+      total: usuarios.length
+    });
+
+    console.log(`[MIGRAÇÃO] Completada: ${corrigidos} usuários corrigidos, ${erros} erros`);
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro na migração: " + err.message });
   }
 });
 
