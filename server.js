@@ -1348,56 +1348,62 @@ app.get("/achievements-usuario", autenticar, async (req, res) => {
   }
 });
 
-const XP_POR_RANK = [
-  100,     // Rank 1 -> 2 (100 - 0)
-  400,     // Rank 2 -> 3 (500 - 100)
-  1000,    // Rank 3 -> 4 (1500 - 500)
-  2200,    // Rank 4 -> 5 (3700 - 1500)
-  3400,    // Rank 5 -> 6 (7100 - 3700)
-  5200,    // Rank 6 -> 7 (12300 - 7100)
-  7700,    // Rank 7 -> 8 (20000 - 12300)
-  9000,    // Rank 8 -> 9 (29000 - 20000)
-  12000,   // Rank 9 -> 10 (41000 - 29000)
-  16000,   // Rank 10 -> 11 (57000 - 41000)
-  19000,   // Rank 11 -> 12 (76000 - 57000)
-  22000,   // Rank 12 -> 13 (98000 - 76000)
-  27000,   // Rank 13 -> 14 (125000 - 98000)
-  31000,   // Rank 14 -> 15 (156000 - 125000)
-  36000,   // Rank 15 -> 16 (192000 - 156000)
-  41000,   // Rank 16 -> 17 (233000 - 192000)
-  47000,   // Rank 17 -> 18 (280000 - 233000)
-  52000,   // Rank 18 -> 19 (332000 - 280000)
-  58000,   // Rank 19 -> 20 (390000 - 332000)
-  65000,   // Rank 20 -> 21 (455000 - 390000)
-  72000,   // Rank 21 -> 22 (527000 - 455000)
-  79000,   // Rank 22 -> 23 (606000 - 527000)
-  86000,   // Rank 23 -> 24 (692000 - 606000)
-  95000,   // Rank 24 -> 25 (787000 - 692000)
-  102000,  // Rank 25 -> 26 (889000 - 787000)
-  111000,  // Rank 26 -> 27 (1000000 - 889000)
-  122000,  // Rank 27 -> 28 (1122000 - 1000000)
-  133000,  // Rank 28 -> 29 (1255000 - 1122000)
-  145000,  // Rank 29 -> 30 (1400000 - 1255000)
-  600000,  // Rank 30 -> 31 (2000000 - 1400000)
-  0        // Rank 31 (Lenda - Rank Máximo)
+const RANK_THRESHOLDS = [
+  0,
+  100,
+  500,
+  1500,
+  3700,
+  7100,
+  12300,
+  20000,
+  29000,
+  41000,
+  57000,
+  76000,
+  98000,
+  125000,
+  156000,
+  192000,
+  233000,
+  280000,
+  332000,
+  390000,
+  455000,
+  527000,
+  606000,
+  692000,
+  787000,
+  889000,
+  1000000,
+  1122000,
+  1255000,
+  1400000,
+  2000000
 ];
 
 const RANK_MAXIMO = 31;
 
 function calcularRankEProgressaoXP(xpAtual, rankAtual) {
-  let rank = Math.max(1, Number(rankAtual) || 1);
+  const rankInformado = Math.max(1, Number(rankAtual) || 1);
   let xp = Math.max(0, Number(xpAtual) || 0);
 
-  while (rank < RANK_MAXIMO) {
-    const requisito = XP_POR_RANK[rank - 1] || 0;
-    if (!requisito || xp < requisito) break;
+  if (rankInformado > 1) {
+    const thresholdAtual = RANK_THRESHOLDS[rankInformado - 1] || 0;
+    if (xp < thresholdAtual) {
+      xp += thresholdAtual;
+    }
+  }
 
-    xp -= requisito;
-    rank += 1;
+  let rank = 1;
+  for (let rankCandidate = 2; rankCandidate <= RANK_MAXIMO; rankCandidate++) {
+    if (xp >= RANK_THRESHOLDS[rankCandidate - 1]) {
+      rank = rankCandidate;
+    }
   }
 
   if (rank >= RANK_MAXIMO) {
-    return { rank: RANK_MAXIMO, xp: 0 };
+    return { rank: RANK_MAXIMO, xp };
   }
 
   return { rank, xp };
@@ -1451,7 +1457,8 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
       xpGanho = quantidade * 2;
     }
     
-    const progresso = calcularRankEProgressaoXP((usuario.xp || 0) + xpGanho, usuario.rank || 1);
+    const estadoAtual = calcularRankEProgressaoXP(usuario.xp || 0, usuario.rank || 1);
+    const progresso = calcularRankEProgressaoXP(estadoAtual.xp + xpGanho, estadoAtual.rank || 1);
     usuario.rank = progresso.rank;
     usuario.xp = progresso.xp;
 
@@ -2218,44 +2225,17 @@ app.get("/chat/usuarios-online", async (req, res) => {
 // === MIGRAÇÃO: Corrigir XP de todos os usuários (apenas Dogue) ===
 app.post("/admin/migrar-xp-fix", autenticar, verificarDogue, async (req, res) => {
   try {
-    const xpPorRank = [
-      0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600, 11700,
-      14000, 16500, 19200, 22100, 25200, 28500, 32000, 35700, 39600, 43700,
-      48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
-    ];
-
     const usuarios = await Usuario.find({});
     let corrigidos = 0;
     let erros = 0;
 
     for (const usuario of usuarios) {
       try {
-        let novoRank = 1;
-        let novoXp = usuario.xp || 0;
+        const progresso = calcularRankEProgressaoXP(usuario.xp || 0, usuario.rank || 1);
 
-        // Recalcular o rank baseado no XP total
-        for (let rank = 1; rank < 30; rank++) {
-          if (novoXp >= xpPorRank[rank + 1]) {
-            novoRank = rank + 1;
-          } else {
-            break;
-          }
-        }
-
-        // Calcular XP relativo ao rank atual
-        if (novoRank > 1) {
-          novoXp = novoXp - xpPorRank[novoRank];
-        }
-
-        // Garantir que XP está no intervalo correto
-        if (novoRank === 30) {
-          novoXp = Math.min(novoXp, xpPorRank[30] - xpPorRank[29]); // XP máximo para rank 30
-        }
-
-        // Só atualizar se houve mudança
-        if (usuario.rank !== novoRank || usuario.xp !== novoXp) {
-          usuario.rank = novoRank;
-          usuario.xp = Math.max(0, novoXp); // Nunca negativo
+        if (usuario.rank !== progresso.rank || usuario.xp !== progresso.xp) {
+          usuario.rank = progresso.rank;
+          usuario.xp = Math.max(0, progresso.xp); // Nunca negativo
           await usuario.save();
           corrigidos++;
           
