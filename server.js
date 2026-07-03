@@ -1389,26 +1389,56 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
     }
     
     usuario.xp = (usuario.xp || 0) + xpGanho;
+
+  const xpPorRank = [
+    100,     // Rank 1 -> 2 (100 - 0)
+    400,     // Rank 2 -> 3 (500 - 100)
+    1000,    // Rank 3 -> 4 (1500 - 500)
+    2200,    // Rank 4 -> 5 (3700 - 1500)
+    3400,    // Rank 5 -> 6 (7100 - 3700)
+    5200,    // Rank 6 -> 7 (12300 - 7100)
+    7700,    // Rank 7 -> 8 (20000 - 12300)
+    9000,    // Rank 8 -> 9 (29000 - 20000)
+    12000,   // Rank 9 -> 10 (41000 - 29000)
+    16000,   // Rank 10 -> 11 (57000 - 41000)
+    19000,   // Rank 11 -> 12 (76000 - 57000)
+    22000,   // Rank 12 -> 13 (98000 - 76000)
+    27000,   // Rank 13 -> 14 (125000 - 98000)
+    31000,   // Rank 14 -> 15 (156000 - 125000)
+    36000,   // Rank 15 -> 16 (192000 - 156000)
+    41000,   // Rank 16 -> 17 (233000 - 192000)
+    47000,   // Rank 17 -> 18 (280000 - 233000)
+    52000,   // Rank 18 -> 19 (332000 - 280000)
+    58000,   // Rank 19 -> 20 (390000 - 332000)
+    65000,   // Rank 20 -> 21 (455000 - 390000)
+    72000,   // Rank 21 -> 22 (527000 - 455000)
+    79000,   // Rank 22 -> 23 (606000 - 527000)
+    86000,   // Rank 23 -> 24 (692000 - 606000)
+    95000,   // Rank 24 -> 25 (787000 - 692000)
+    102000,  // Rank 25 -> 26 (889000 - 787000)
+    111000,  // Rank 26 -> 27 (1000000 - 889000)
+    122000,  // Rank 27 -> 28 (1122000 - 1000000)
+    133000,  // Rank 28 -> 29 (1255000 - 1122000)
+    145000,  // Rank 29 -> 30 (1400000 - 1255000)
+    600000,  // Rank 30 -> 31 (2000000 - 1400000)
+    0        // Rank 31 (Lenda - Rank Máximo)
+];
     
-    // Definir XP máximo por rank (XP necessário para passar de rank)
-    const xpPorRank = [
-      0, 500, 1200, 2100, 3200, 4500, 6000, 7700, 9600, 11700,
-      14000, 16500, 19200, 22100, 25200, 28500, 32000, 35700, 39600, 43700,
-      48000, 52500, 57200, 62100, 67200, 72500, 78000, 83700, 89600, 95700, 102000
-    ];
-    
-    // Verificar se subiu de rank e resetar XP para o novo rank
-    while (usuario.rank < 30 && usuario.xp >= xpPorRank[usuario.rank + 1]) {
-      // Subtrair o XP necessário para passar de rank
-      usuario.xp -= xpPorRank[usuario.rank + 1];
-      usuario.rank++;
-    }
-    
-    // Capped at rank 30 - manter XP entre 0 e o XP necessário para rank 30
-    if (usuario.rank > 30) {
-      usuario.rank = 30;
-      usuario.xp = Math.min(usuario.xp, xpPorRank[30]); // XP máximo ao alcançar rank 30
-    }
+   // O rank máximo agora é 31 (Lenda)
+const RANK_MAXIMO = 31;
+
+// Verificar se subiu de rank e resetar o XP atual com base no custo do rank que ele acabou de passar
+while (usuario.rank < RANK_MAXIMO && usuario.xp >= xpPorRank[usuario.rank - 1]) {
+  // Subtrai o XP que era necessário para sair do rank atual
+  usuario.xp -= xpPorRank[usuario.rank - 1];
+  usuario.rank++;
+}
+
+// Capped no Rank Máximo (31)
+if (usuario.rank >= RANK_MAXIMO) {
+  usuario.rank = RANK_MAXIMO;
+  usuario.xp = 0; // No rank máximo, o XP não precisa mais acumular para o próximo nível
+}
     
     // Garantir que XP nunca seja negativo
     if (usuario.xp < 0) usuario.xp = 0;
