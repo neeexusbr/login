@@ -2239,6 +2239,56 @@ app.post("/admin/migrar-xp-fix", autenticar, verificarDogue, async (req, res) =>
   }
 });
 
+// === ADMIN: Mudar XP e Rank de um usuário (apenas Dogue) ===
+app.post("/admin/mudar-xp-rank", autenticar, verificarDogue, async (req, res) => {
+  try {
+    const { nomeUsuario, novoRank, novoXp } = req.body;
+
+    if (!nomeUsuario) {
+      return res.status(400).json({ ok: false, mensagem: "Nome do usuário inválido!" });
+    }
+
+    const novoRankNum = parseInt(novoRank);
+    const novoXpNum = parseInt(novoXp);
+
+    if (isNaN(novoRankNum) || novoRankNum < 1 || novoRankNum > 30) {
+      return res.status(400).json({ ok: false, mensagem: "Rank deve ser entre 1 e 30!" });
+    }
+
+    if (isNaN(novoXpNum) || novoXpNum < 0) {
+      return res.status(400).json({ ok: false, mensagem: "XP deve ser um número positivo!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    const rankAnterior = usuario.rank;
+    const xpAnterior = usuario.xp;
+
+    usuario.rank = novoRankNum;
+    usuario.xp = novoXpNum;
+    await usuario.save();
+
+    console.log(`[XP-RANK-ADMIN] Dogue alterou ${nomeUsuario}: Rank ${rankAnterior}->${novoRankNum}, XP ${xpAnterior}->${novoXpNum}`);
+
+    res.json({
+      ok: true,
+      mensagem: `✅ Rank e XP de ${nomeUsuario} alterados com sucesso!`,
+      usuarioAtualizado: {
+        nome: usuario.nome,
+        rankAnterior: rankAnterior,
+        rankNovo: usuario.rank,
+        xpAnterior: xpAnterior,
+        xpNovo: usuario.xp
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao alterar XP/Rank: " + err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);
 });
