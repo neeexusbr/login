@@ -1536,6 +1536,83 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
   }
 });
 
+// === ENDPOINT PARA SINCRONIZAR DADOS SIMPLES ===
+app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
+  try {
+    const { moedas, playtime, tag, tagColor, tagColorType, fotoPerfil, lastDailyRewardDate } = req.body;
+
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    // Sincronizar cada campo se fornecido
+    if (moedas !== undefined && !isNaN(parseInt(moedas))) {
+      usuario.moedas = parseInt(moedas);
+    }
+    if (playtime !== undefined && !isNaN(parseInt(playtime))) {
+      usuario.tempo_jogo = parseInt(playtime);
+    }
+    if (tag !== undefined) {
+      usuario.tagPersonalizada = tag;
+    }
+    if (tagColor !== undefined) {
+      usuario.corTagPersonalizada = tagColor;
+    }
+    if (tagColorType !== undefined) {
+      usuario.tipoCorTag = tagColorType;
+    }
+    if (fotoPerfil !== undefined) {
+      usuario.foto_perfil = fotoPerfil;
+    }
+
+    await usuario.save();
+
+    console.log(`[SYNC-SIMPLES] ✅ Dados sincronizados para ${req.usuario.nome}`);
+    res.json({ 
+      ok: true, 
+      mensagem: "Dados sincronizados com sucesso!",
+      usuario: {
+        moedas: usuario.moedas,
+        tempo_jogo: usuario.tempo_jogo,
+        tagPersonalizada: usuario.tagPersonalizada,
+        corTagPersonalizada: usuario.corTagPersonalizada,
+        tipoCorTag: usuario.tipoCorTag,
+        foto_perfil: usuario.foto_perfil
+      }
+    });
+  } catch (err) {
+    console.error('[SYNC-SIMPLES] Erro ao sincronizar dados:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao sincronizar dados: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA CARREGAR DADOS SIMPLES DO SERVIDOR ===
+app.get("/carregar-dados-simples", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    console.log(`[LOAD-SIMPLES] ✅ Dados carregados para ${req.usuario.nome}`);
+    res.json({
+      ok: true,
+      dados: {
+        moedas: usuario.moedas,
+        playtime: usuario.tempo_jogo,
+        tag: usuario.tagPersonalizada,
+        tagColor: usuario.corTagPersonalizada,
+        tagColorType: usuario.tipoCorTag,
+        fotoPerfil: usuario.foto_perfil
+      }
+    });
+  } catch (err) {
+    console.error('[LOAD-SIMPLES] Erro ao carregar dados:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao carregar dados: " + err.message });
+  }
+});
+
 // === ADMIN: ADICIONAR LOOTBOXES ===
 app.post("/admin/adicionar-lootbox", autenticar, verificarAdmin, async (req, res) => {
   try {
