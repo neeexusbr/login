@@ -44,8 +44,11 @@ const Usuario = mongoose.model('Usuario', new mongoose.Schema({
   pendingAlert: {
     title: { type: String, default: '' },
     message: { type: String, default: '' },
+    codigo: { type: String, default: null },
+    tipo: { type: String, default: null },
     createdAt: { type: Date, default: null }
-  }
+  },
+  lastSeenAt: { type: Date, default: Date.now }
 }));
 
 // Modelo Backup
@@ -423,8 +426,13 @@ app.post("/admin/definir-admin", autenticar, verificarAdmin, async (req, res) =>
 
 app.get("/admin/listar-usuarios", autenticar, verificarAdmin, async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, isAdmin: 1, tipoAdmin: 1, _id: 0 });
-    res.json({ ok: true, usuarios });
+    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, isAdmin: 1, tipoAdmin: 1, lastSeenAt: 1, _id: 0 }).lean();
+    const usuariosComStatus = usuarios.map(usuario => ({
+      ...usuario,
+      online: isUserOnline(usuario)
+    }));
+
+    res.json({ ok: true, usuarios: usuariosComStatus });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -2402,22 +2410,50 @@ app.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);
 });
 
+function isUserOnline(usuario) {
+  if (!usuario?.lastSeenAt) return false;
+  const ttlMs = 2 * 60 * 1000;
+  return Date.now() - new Date(usuario.lastSeenAt).getTime() <= ttlMs;
+}
+
+app.post("/user/heartbeat", autenticar, async (req, res) => {
+  try {
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    usuario.lastSeenAt = new Date();
+    await usuario.save();
+
+    res.json({ ok: true, online: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao atualizar presença: " + err.message });
+  }
+});
+
 // === ADMIN: Alertar usuário (cria um popup que aparecerá na próxima visita do usuário)
 app.post("/admin/alertar-usuario", autenticar, verificarAdmin, async (req, res) => {
   try {
-       // Apenas Dogue pode usar
     if (req.usuario.nome !== "Dogue") {
       return res.status(403).json({ ok: false, mensagem: "❌ Apenas Dogue pode fazer isso!" });
     }
-    const { nomeUsuario, title, message, codigo } = req.body;
+
+    const { nomeUsuario, title, message, codigo, onlineOnly = false } = req.body;
     if (!nomeUsuario) return res.status(400).json({ ok: false, mensagem: "Informe o nome do usuário." });
-const usuario = await Usuario.findOne({ nome: nomeUsuario });
+
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
     if (!usuario) return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+
+    if (onlineOnly && !isUserOnline(usuario)) {
+      return res.status(400).json({ ok: false, mensagem: "❌ O usuário está offline no momento." });
+    }
 
     usuario.pendingAlert = {
       title: String(title || '').slice(0, 200),
       message: String(message || '').slice(0, 2000),
-      codigo: codigo ? String(codigo).slice(0, 50) : null, // se quiser mandar código junto
+      codigo: codigo ? String(codigo).slice(0, 50) : null,
+      tipo: 'normal',
       createdAt: new Date()
     };
 
@@ -2429,42 +2465,48 @@ const usuario = await Usuario.findOne({ nome: nomeUsuario });
     res.status(500).json({ ok: false, mensagem: "Erro ao enviar alerta: " + err.message });
   }
 });
+
 // === ADMIN: Alertar TODOS os usuários (alerta global)
 app.post("/admin/alertar-todos", autenticar, verificarAdmin, async (req, res) => {
   try {
     if (req.usuario.nome !== "Dogue") {
       return res.status(403).json({ ok: false, mensagem: "❌ Apenas Dogue pode fazer isso!" });
     }
-    const { title, message, codigo } = req.body; // codigo é opcional
-    
-    if (!title || !message) 
+
+    const { title, message, codigo, onlineOnly = false } = req.body;
+
+    if (!title || !message) {
       return res.status(400).json({ ok: false, mensagem: "Informe title e message." });
+    }
 
     const alerta = {
       title: String(title).slice(0, 200),
       message: String(message).slice(0, 2000),
-      codigo: codigo ? String(codigo).slice(0, 50) : null, // se quiser mandar código junto
+      codigo: codigo ? String(codigo).slice(0, 50) : null,
       createdAt: new Date(),
-      tipo: "global" // pra você diferenciar no front
+      tipo: 'global'
     };
 
-    // Atualiza todos de uma vez. Muito mais rápido que for loop
-    const result = await Usuario.updateMany(
-      {}, // pega todo mundo
-      { $set: { pendingAlert: alerta } }
-    );
+    const filtro = onlineOnly
+      ? { lastSeenAt: { $gte: new Date(Date.now() - 2 * 60 * 1000) } }
+      : {};
+
+    const result = await Usuario.updateMany(filtro, { $set: { pendingAlert: alerta } });
 
     console.log(`[ALERT-GLOBAL] ${req.usuario.nome} enviou alerta para ${result.modifiedCount} usuários`);
-    
-    res.json({ 
-      ok: true, 
-      mensagem: `Alerta global enviado para ${result.modifiedCount} usuários!`,
+
+    res.json({
+      ok: true,
+      mensagem: onlineOnly
+        ? `Alerta global enviado para ${result.modifiedCount} usuários online!`
+        : `Alerta global enviado para ${result.modifiedCount} usuários!`,
       usuariosAfetados: result.modifiedCount
     });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro ao enviar alerta global: " + err.message });
   }
 });
+
 // Endpoint para o usuário obter e limpar o alerta pendente
 app.get("/user/alerts", autenticar, async (req, res) => {
   try {
