@@ -65,7 +65,9 @@ const Usuario = mongoose.model('Usuario', new mongoose.Schema({
   idCorBordaPerfil: { type: String, default: 'gold' }, // id da cor de borda selecionada
   rank: { type: Number, default: 1 }, // Rank do usuário (1-30)
   xp: { type: Number, default: 0 }, // Experiência atual do usuário
-  premiumXp: { type: Boolean, default: false } // Premium: dobra XP ganhado
+  premiumXp: { type: Boolean, default: false }, // Premium: dobra XP ganhado
+  banidoAte: { type: Date, default: null },
+  banMotivo: { type: String, default: '' }
   ,
   pendingAlert: {
     title: { type: String, default: '' },
@@ -204,6 +206,15 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ ok: false, mensagem: "Senha incorreta!" });
     }
 
+    if (usuario.banidoAte && usuario.banidoAte > new Date()) {
+      return res.status(403).json({ ok: false, bloqueado: true, mensagem: `Você foi banido até ${usuario.banidoAte.toLocaleString('pt-BR')}. Motivo: ${usuario.banMotivo || 'Não informado.'}`, banidoAte: usuario.banidoAte, motivo: usuario.banMotivo || '' });
+    }
+    if (usuario.banidoAte) {
+      usuario.banidoAte = null;
+      usuario.banMotivo = '';
+      await usuario.save();
+    }
+
     const token = jwt.sign({ nome: usuario.nome, isAdmin: usuario.isAdmin }, SECRET, { expiresIn: "30d" });
     res.json({ ok: true, mensagem: "Login realizado com sucesso!", token, isAdmin: usuario.isAdmin });
   } catch (err) {
@@ -223,12 +234,22 @@ function autenticar(req, res, next) {
     return res.status(401).json({ ok: false, mensagem: "Token não fornecido!" });
   }
 
-  jwt.verify(token, SECRET, (err, usuario) => {
+  jwt.verify(token, SECRET, async (err, usuario) => {
     if (err) {
       console.log('[AUTH] ERRO ao verificar token:', err.message);
       return res.status(403).json({ ok: false, mensagem: "Token inválido ou expirado! " + err.message });
     }
     console.log('[AUTH] Token válido para usuário:', usuario.nome);
+    const conta = await Usuario.findOne({ nome: usuario.nome });
+    if (!conta) return res.status(401).json({ ok: false, mensagem: "Conta não encontrada." });
+    if (conta.banidoAte && conta.banidoAte > new Date()) {
+      return res.status(403).json({ ok: false, bloqueado: true, mensagem: `Você foi banido até ${conta.banidoAte.toLocaleString('pt-BR')}. Motivo: ${conta.banMotivo || 'Não informado.'}`, banidoAte: conta.banidoAte, motivo: conta.banMotivo || '' });
+    }
+    if (conta.banidoAte) {
+      conta.banidoAte = null;
+      conta.banMotivo = '';
+      await conta.save();
+    }
     req.usuario = usuario;
     next();
   });
@@ -932,6 +953,35 @@ app.post("/admin/mudar-cor-borda-usuario", autenticar, verificarAdmin, async (re
   }
 });
 
+// Banir usuário (apenas Dogue)
+app.post("/admin/banir-usuario", autenticar, verificarDogue, async (req, res) => {
+  try {
+    const nomeUsuario = String(req.body.nomeUsuario || '').trim();
+    const duracaoHoras = Number(req.body.duracaoHoras);
+    const motivo = String(req.body.motivo || '').trim();
+    if (!nomeUsuario || !Number.isInteger(duracaoHoras) || duracaoHoras < 1 || duracaoHoras > 87600 || !motivo) return res.status(400).json({ ok: false, mensagem: "Informe nome, duração válida (1 a 87600 horas) e motivo." });
+    if (nomeUsuario === "Dogue") return res.status(403).json({ ok: false, mensagem: "A conta do dono não pode ser banida." });
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!usuario) return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    usuario.banidoAte = new Date(Date.now() + duracaoHoras * 60 * 60 * 1000);
+    usuario.banMotivo = motivo.slice(0, 500);
+    await usuario.save();
+    res.json({ ok: true, mensagem: `${nomeUsuario} foi banido até ${usuario.banidoAte.toLocaleString('pt-BR')}.`, banidoAte: usuario.banidoAte });
+  } catch (err) { res.status(500).json({ ok: false, mensagem: "Erro ao banir usuário: " + err.message }); }
+});
+
+// Excluir conta (apenas Dogue)
+app.delete("/admin/excluir-conta", autenticar, verificarDogue, async (req, res) => {
+  try {
+    const nomeUsuario = String(req.body.nomeUsuario || '').trim();
+    if (!nomeUsuario) return res.status(400).json({ ok: false, mensagem: "Informe o nome do usuário." });
+    if (nomeUsuario === "Dogue") return res.status(403).json({ ok: false, mensagem: "A conta do dono não pode ser excluída." });
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!usuario) return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    await Promise.all([Usuario.deleteOne({ _id: usuario._id }), Backup.deleteOne({ usuario: nomeUsuario }), Compra.deleteMany({ usuario: nomeUsuario }), MensagemGlobal.deleteMany({ usuario: nomeUsuario }), MensagemPrivada.deleteMany({ $or: [{ remetente: nomeUsuario }, { destinatario: nomeUsuario }] }), Solicitacao.deleteMany({ $or: [{ solicitadoPor: nomeUsuario }, { destinatario: nomeUsuario }] })]);
+    res.json({ ok: true, mensagem: `Conta de ${nomeUsuario} excluída permanentemente.` });
+  } catch (err) { res.status(500).json({ ok: false, mensagem: "Erro ao excluir conta: " + err.message }); }
+});
 // Botão de Emergência - Resetar Admins (apenas Dogue)
 app.post("/admin/emergencia-reset", autenticar, verificarDogue, async (req, res) => {
   try {

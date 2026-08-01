@@ -592,8 +592,6 @@ document.getElementById("loginForm").addEventListener("submit", async e => {
   submitAnimation();
   const resposta = await enviarDados(`${API_URL}/login`, { nome, senha });
 
-  alert(resposta.mensagem); // mostra a mensagem do servidor
-
   if (resposta.ok) {
     localStorage.setItem("token", resposta.token);
     localStorage.setItem("usuarioLogado", nome);
