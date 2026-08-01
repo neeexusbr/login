@@ -1007,7 +1007,7 @@ app.post("/admin/remover-head-admin", autenticar, verificarDogue, async (req, re
 // === ENDPOINTS DE LEADERBOARD ===
 app.get("/leaderboard", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
       .sort({ tempo_jogo: -1 })
       .limit(20)
       .lean(); // Converter para objeto puro do JavaScript
@@ -1031,6 +1031,7 @@ app.get("/leaderboard", async (req, res) => {
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
+        isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
         posicao: index + 1
@@ -1061,6 +1062,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         tempo_jogo: 1, 
         rank: 1, 
         xp: 1,
+        isAdmin: 1,
         itensComprados: 1,
         _id: 0 
       })
@@ -1087,6 +1089,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
+        isAdmin: !!user.isAdmin,
         xp: user.xp || 0, // <--- Incluído no retorno para o front-end conseguir exibir
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
@@ -1104,7 +1107,7 @@ app.get("/leaderboard/rank", async (req, res) => {
 // === LEADERBOARD DE MOEDAS ===
 app.get("/leaderboard/moedas", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
       .sort({ moedas: -1 })
       .limit(20)
       .lean();
@@ -1128,6 +1131,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
+        isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
         posicao: index + 1
@@ -1145,7 +1149,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
 // === LEADERBOARD DE GIROS ===
 app.get("/leaderboard/giros", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
       .sort({ spins: -1 })
       .limit(20)
       .lean();
@@ -1170,6 +1174,7 @@ app.get("/leaderboard/giros", async (req, res) => {
         corBordaPerfil: user.corBordaPerfil || '#ffd700',
         idCorBordaPerfil: user.idCorBordaPerfil || 'gold',
         rank: user.rank || 1,
+        isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         premio: premio,
         posicao: index + 1
@@ -2076,8 +2081,20 @@ app.get("/chat/mensagens-globais", async (req, res) => {
     // Reverter para ordem cronológica
     const mensagensOrdenadas = mensagens.reverse();
 
-    console.log(`[CHAT-GLOBAL] Retornando ${mensagensOrdenadas.length} mensagens`);
-    res.json({ ok: true, mensagens: mensagensOrdenadas });
+    const nomesUsuarios = [...new Set(mensagensOrdenadas.map(msg => msg.usuario))];
+    const usuarios = await Usuario.find({ nome: { $in: nomesUsuarios } }, { nome: 1, isAdmin: 1 }).lean();
+    const usuarioMap = usuarios.reduce((map, user) => {
+      map[user.nome] = user;
+      return map;
+    }, {});
+
+    const mensagensComBadge = mensagensOrdenadas.map(msg => ({
+      ...msg,
+      isAdmin: usuarioMap[msg.usuario]?.isAdmin || false
+    }));
+
+    console.log(`[CHAT-GLOBAL] Retornando ${mensagensComBadge.length} mensagens`);
+    res.json({ ok: true, mensagens: mensagensComBadge });
   } catch (err) {
     console.error('[CHAT-GLOBAL] Erro:', err);
     res.status(500).json({ ok: false, mensagem: "Erro ao obter mensagens: " + err.message });
@@ -2230,6 +2247,18 @@ app.get("/chat/conversa-privada/:usuario", autenticar, async (req, res) => {
       ]
     }).sort({ timestamp: 1 }).lean();
 
+    const nomesEnvolvidos = [...new Set(mensagens.map(msg => msg.remetente))];
+    const usuarios = await Usuario.find({ nome: { $in: nomesEnvolvidos } }, { nome: 1, isAdmin: 1 }).lean();
+    const usuarioMap = usuarios.reduce((map, user) => {
+      map[user.nome] = user;
+      return map;
+    }, {});
+
+    const mensagensComBadge = mensagens.map(msg => ({
+      ...msg,
+      remetenteIsAdmin: usuarioMap[msg.remetente]?.isAdmin || false
+    }));
+
     // Marcar como lidas as mensagens recebidas
     await MensagemPrivada.updateMany(
       {
@@ -2240,12 +2269,12 @@ app.get("/chat/conversa-privada/:usuario", autenticar, async (req, res) => {
       { lida: true }
     );
 
-    console.log(`[CHAT] ${req.usuario.nome} abriu conversa com ${usuario} (${mensagens.length} mensagens)`);
+    console.log(`[CHAT] ${req.usuario.nome} abriu conversa com ${usuario} (${mensagensComBadge.length} mensagens)`);
 
     res.json({ 
       ok: true, 
-      mensagens: mensagens,
-      total: mensagens.length
+      mensagens: mensagensComBadge,
+      total: mensagensComBadge.length
     });
   } catch (err) {
     console.error('[CHAT] Erro ao obter conversa:', err);
