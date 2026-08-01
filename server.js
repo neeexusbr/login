@@ -6,6 +6,87 @@ const jwt = require("jsonwebtoken");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || "stevejobs"; // use variável de ambiente no Render
+const MAX_MOEDAS_AUMENTO = 10000;
+const MAX_XP_AUMENTO = 10000;
+const MAX_SPINS_AUMENTO = 100;
+const MAX_TEMPO_JOGO_AUMENTO = 1440;
+const MAX_ADMIN_MOEDAS_AUMENTO = 1000000;
+const MAX_BACKUP_ITEMS = 200;
+const ALLOWED_SECRET_GAMES = new Set(['secret1', 'secret2', 'secret3', 'secret4', 'secret5']);
+const ALLOWED_ACHIEVEMENTS = new Set(['detetive', 'sortudo', 'infinity', 'gaster', '50goal']);
+const ALLOWED_ITEM_IDS = new Set([
+  'all-games', 'custom-tag', 'cor-comum', 'cor-especial', 'new-game',
+  'spins-5', 'spins-10', 'spins-25', 'spins-50', 'premium-xp', 'tanki-mode',
+  'key', 'fast-spin', '404-notfound', 'spins-100', 'cor-gold', 'cor-purple',
+  'cor-cyan', 'cor-pink', 'cor-lime-glow', 'cor-sky-blue', 'cor-rainbow'
+]);
+
+function normalizarInteiro(valor, padrao = 0) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) {
+    return padrao;
+  }
+  return Math.max(0, Math.floor(numero));
+}
+
+function validarDelta(valorNovo, valorAtual, limite, campo) {
+  const delta = valorNovo - valorAtual;
+
+  if (valorNovo < 0) {
+    return { ok: false, mensagem: `${campo} não pode ser negativo.` };
+  }
+
+  if (Math.abs(delta) > limite) {
+    return { ok: false, mensagem: `${campo} mudou demais de uma vez (${Math.abs(delta)} > ${limite}).` };
+  }
+
+  return { ok: true };
+}
+
+function normalizarNomeUsuario(valor) {
+  if (typeof valor !== 'string') return null;
+  const nome = valor.trim();
+  if (!nome || nome.length > 30 || !/^[a-zA-Z0-9_-]+$/.test(nome)) {
+    return null;
+  }
+  return nome;
+}
+
+function validarItemId(itemId) {
+  if (typeof itemId !== 'string') return null;
+  const valor = itemId.trim();
+  if (!valor || valor.length > 40) return null;
+  if (!/^[a-z0-9-]+$/i.test(valor)) return null;
+  if (valor.startsWith('cor-')) return valor;
+  if (ALLOWED_ITEM_IDS.has(valor)) return valor;
+  return null;
+}
+
+function validarJogoId(jogoId) {
+  if (typeof jogoId !== 'string') return null;
+  const valor = jogoId.trim();
+  if (!valor || valor.length > 30) return null;
+  if (!/^[a-z0-9-]+$/i.test(valor)) return null;
+  return ALLOWED_SECRET_GAMES.has(valor) ? valor : null;
+}
+
+function validarAchievementId(achievementId) {
+  if (typeof achievementId !== 'string') return null;
+  const valor = achievementId.trim();
+  if (!valor || valor.length > 40) return null;
+  if (!/^[a-z0-9-]+$/i.test(valor)) return null;
+  return ALLOWED_ACHIEVEMENTS.has(valor) ? valor : null;
+}
+
+function sanitizarListaStrings(valor, limite = MAX_BACKUP_ITEMS) {
+  if (!Array.isArray(valor)) return [];
+  const lista = valor
+    .filter(Boolean)
+    .map(item => String(item).trim())
+    .filter(Boolean)
+    .slice(0, limite);
+  return [...new Set(lista)];
+}
 
 app.use(express.json({ limit: '50mb' })); // Aumentar limite de tamanho
 app.use(cors({
@@ -223,15 +304,25 @@ app.post("/salvarBackup", autenticar, async (req, res) => {
       });
     }
 
+    const achievements = Array.isArray(dados?.achievements)
+      ? dados.achievements.map(item => validarAchievementId(item)).filter(Boolean)
+      : [];
+    const unlockedGames = Array.isArray(dados?.unlockedGames)
+      ? dados.unlockedGames.map(item => validarJogoId(item)).filter(Boolean)
+      : [];
+    const purchasedItems = Array.isArray(dados?.purchasedItems)
+      ? dados.purchasedItems.map(item => validarItemId(item)).filter(Boolean)
+      : [];
+
     // Salvar backup com estrutura otimizada
     await Backup.updateOne(
       { usuario: req.usuario.nome },
       { 
         dados: {
           dados: dados.dados || {},
-          achievements: dados.achievements || [],
-          unlockedGames: dados.unlockedGames || [],
-          purchasedItems: dados.purchasedItems || [],
+          achievements: achievements.slice(0, MAX_BACKUP_ITEMS),
+          unlockedGames: unlockedGames.slice(0, MAX_BACKUP_ITEMS),
+          purchasedItems: purchasedItems.slice(0, MAX_BACKUP_ITEMS),
           preferences: dados.preferences || {},
           timestamp: dados.timestamp || new Date().toISOString()
         },
@@ -317,7 +408,18 @@ function verificarDogue(req, res, next) {
 app.post("/admin/adicionar-moedas", autenticar, verificarAdmin, async (req, res) => {
   try {
     const { nomeUsuario, quantidade } = req.body;
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
+    const quantidadeInt = normalizarInteiro(quantidade);
+
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    if (!Number.isInteger(quantidade) || quantidadeInt <= 0 || quantidadeInt > MAX_ADMIN_MOEDAS_AUMENTO) {
+      return res.status(400).json({ ok: false, mensagem: "Quantidade inválida ou muito alta!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
 
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
@@ -325,7 +427,7 @@ app.post("/admin/adicionar-moedas", autenticar, verificarAdmin, async (req, res)
 
     // Se for Dogue (dono), adiciona direto sem aprovação
     if (req.usuario.nome === "Dogue") {
-      usuario.moedas = (usuario.moedas || 0) + quantidade;
+      usuario.moedas = (usuario.moedas || 0) + quantidadeInt;
       await usuario.save();
       
       console.log(`[MOEDAS-DIRETO] Dogue adicionou ${quantidade} moedas direto a ${nomeUsuario}`);
@@ -362,18 +464,29 @@ app.post("/admin/adicionar-moedas", autenticar, verificarAdmin, async (req, res)
 app.post("/admin/desbloquear-jogo", autenticar, verificarAdmin, async (req, res) => {
   try {
     const { nomeUsuario, jogoId } = req.body;
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
+    const jogoValido = validarJogoId(jogoId);
+
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    if (!jogoValido) {
+      return res.status(400).json({ ok: false, mensagem: "ID de jogo inválido!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
 
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
-    if (!usuario.jogosSecretos.includes(jogoId)) {
-      usuario.jogosSecretos.push(jogoId);
+    if (!usuario.jogosSecretos.includes(jogoValido)) {
+      usuario.jogosSecretos.push(jogoValido);
       await usuario.save();
     }
 
-    res.json({ ok: true, mensagem: `✅ Jogo ${jogoId} desbloqueado para ${nomeUsuario}!` });
+    res.json({ ok: true, mensagem: `✅ Jogo ${jogoValido} desbloqueado para ${nomeNormalizado}!` });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -382,7 +495,18 @@ app.post("/admin/desbloquear-jogo", autenticar, verificarAdmin, async (req, res)
 app.post("/admin/adicionar-item", autenticar, verificarAdmin, async (req, res) => {
   try {
     const { nomeUsuario, itemId } = req.body;
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
+    const itemValido = validarItemId(itemId);
+
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    if (!itemValido) {
+      return res.status(400).json({ ok: false, mensagem: "ID de item inválido!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
 
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
@@ -390,12 +514,12 @@ app.post("/admin/adicionar-item", autenticar, verificarAdmin, async (req, res) =
 
 
     // Item comum
-    if (!usuario.itensComprados.includes(itemId)) {
-      usuario.itensComprados.push(itemId);
+    if (!usuario.itensComprados.includes(itemValido)) {
+      usuario.itensComprados.push(itemValido);
       await usuario.save();
     }
 
-    res.json({ ok: true, mensagem: `✅ Item ${itemId} adicionado a ${nomeUsuario}!` });
+    res.json({ ok: true, mensagem: `✅ Item ${itemValido} adicionado a ${nomeNormalizado}!` });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -409,7 +533,13 @@ app.post("/admin/definir-admin", autenticar, verificarAdmin, async (req, res) =>
 
   try {
     const { nomeUsuario } = req.body;
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
+
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
 
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
@@ -557,25 +687,53 @@ app.post("/usar-codigo", autenticar, async (req, res) => {
     }
 
     switch (codigoPromocional.tipoRecompensa) {
-      case 'moedas':
-        usuario.moedas += Number(codigoPromocional.valor || 0);
+      case 'moedas': {
+        const valorMoedas = normalizarInteiro(codigoPromocional.valor || 0);
+        const validacaoMoedas = validarDelta((usuario.moedas || 0) + valorMoedas, usuario.moedas || 0, MAX_MOEDAS_AUMENTO, 'moedas');
+        if (!validacaoMoedas.ok) {
+          return res.status(400).json({ ok: false, mensagem: validacaoMoedas.mensagem });
+        }
+        usuario.moedas = (usuario.moedas || 0) + valorMoedas;
         break;
-      case 'item':
-        if (!usuario.itensComprados.includes(codigoPromocional.itemId)) {
-          usuario.itensComprados.push(codigoPromocional.itemId);
+      }
+      case 'item': {
+        const itemValido = validarItemId(codigoPromocional.itemId);
+        if (!itemValido) {
+          return res.status(400).json({ ok: false, mensagem: 'Item de código promocional inválido.' });
+        }
+        if (!usuario.itensComprados.includes(itemValido)) {
+          usuario.itensComprados.push(itemValido);
         }
         break;
-      case 'spins':
-        usuario.spins += Number(codigoPromocional.valor || 0);
+      }
+      case 'spins': {
+        const valorSpins = normalizarInteiro(codigoPromocional.valor || 0);
+        const validacaoSpins = validarDelta((usuario.spins || 0) + valorSpins, usuario.spins || 0, MAX_SPINS_AUMENTO, 'giros');
+        if (!validacaoSpins.ok) {
+          return res.status(400).json({ ok: false, mensagem: validacaoSpins.mensagem });
+        }
+        usuario.spins = (usuario.spins || 0) + valorSpins;
         break;
-      case 'jogo':
-        if (!usuario.jogosSecretos.includes(codigoPromocional.jogoId)) {
-          usuario.jogosSecretos.push(codigoPromocional.jogoId);
+      }
+      case 'jogo': {
+        const jogoValido = validarJogoId(codigoPromocional.jogoId);
+        if (!jogoValido) {
+          return res.status(400).json({ ok: false, mensagem: 'Jogo de código promocional inválido.' });
+        }
+        if (!usuario.jogosSecretos.includes(jogoValido)) {
+          usuario.jogosSecretos.push(jogoValido);
         }
         break;
-      case 'tempo-jogo':
-        usuario.tempo_jogo += Number(codigoPromocional.valor || 0);
+      }
+      case 'tempo-jogo': {
+        const valorTempo = normalizarInteiro(codigoPromocional.valor || 0);
+        const validacaoTempo = validarDelta((usuario.tempo_jogo || 0) + valorTempo, usuario.tempo_jogo || 0, MAX_TEMPO_JOGO_AUMENTO, 'tempo de jogo');
+        if (!validacaoTempo.ok) {
+          return res.status(400).json({ ok: false, mensagem: validacaoTempo.mensagem });
+        }
+        usuario.tempo_jogo = (usuario.tempo_jogo || 0) + valorTempo;
         break;
+      }
     }
 
     codigoPromocional.usosAtuais += 1;
@@ -814,21 +972,26 @@ app.post("/admin/remover-admin", autenticar, verificarDogue, async (req, res) =>
 app.post("/admin/mudar-tag-usuario", autenticar, verificarDogue, async (req, res) => {
   try {
     const { nomeUsuario, novaTag } = req.body;
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
 
-    if (!novaTag || novaTag.length < 1 || novaTag.length > 10) {
+    if (typeof novaTag !== 'string' || novaTag.trim().length < 1 || novaTag.trim().length > 10) {
       return res.status(400).json({ ok: false, mensagem: "Tag deve ter entre 1 e 10 caracteres!" });
     }
 
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
-    usuario.tagPersonalizada = novaTag;
+    usuario.tagPersonalizada = novaTag.trim();
     await usuario.save();
 
-    console.log(`[TAG-ADMIN] Dogue alterou a tag de ${nomeUsuario} para: ${novaTag}`);
-    res.json({ ok: true, mensagem: `✅ Tag de ${nomeUsuario} alterada para: ${novaTag}` });
+    console.log(`[TAG-ADMIN] Dogue alterou a tag de ${nomeNormalizado} para: ${novaTag.trim()}`);
+    res.json({ ok: true, mensagem: `✅ Tag de ${nomeNormalizado} alterada para: ${novaTag.trim()}` });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -838,21 +1001,26 @@ app.post("/admin/mudar-tag-usuario", autenticar, verificarDogue, async (req, res
 app.post("/admin/mudar-foto-usuario", autenticar, verificarDogue, async (req, res) => {
   try {
     const { nomeUsuario, novaFoto } = req.body;
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
 
-    if (!novaFoto || novaFoto.length === 0) {
+    if (typeof novaFoto !== 'string' || novaFoto.trim().length === 0 || novaFoto.trim().length > 500) {
       return res.status(400).json({ ok: false, mensagem: "Foto inválida!" });
     }
 
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
-    usuario.foto_perfil = novaFoto;
+    usuario.foto_perfil = novaFoto.trim();
     await usuario.save();
 
-    console.log(`[PHOTO-ADMIN] Dogue alterou a foto de ${nomeUsuario}`);
-    res.json({ ok: true, mensagem: `✅ Foto de ${nomeUsuario} atualizada!` });
+    console.log(`[PHOTO-ADMIN] Dogue alterou a foto de ${nomeNormalizado}`);
+    res.json({ ok: true, mensagem: `✅ Foto de ${nomeNormalizado} atualizada!` });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -862,12 +1030,17 @@ app.post("/admin/mudar-foto-usuario", autenticar, verificarDogue, async (req, re
 app.post("/admin/mudar-cor-borda-usuario", autenticar, verificarAdmin, async (req, res) => {
   try {
     const { nomeUsuario, corId } = req.body;
+    const nomeNormalizado = normalizarNomeUsuario(nomeUsuario);
 
-    if (!corId) {
+    if (typeof corId !== 'string' || !corId.trim()) {
       return res.status(400).json({ ok: false, mensagem: "ID da cor inválido!" });
     }
 
-    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!nomeNormalizado) {
+      return res.status(400).json({ ok: false, mensagem: "Nome de usuário inválido!" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeNormalizado });
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
@@ -899,8 +1072,8 @@ app.post("/admin/mudar-cor-borda-usuario", autenticar, verificarAdmin, async (re
     usuario.idCorBordaPerfil = corId;
     await usuario.save();
 
-    console.log(`[BORDA-ADMIN] Admin alterou cor da borda de ${nomeUsuario} para: ${corId}`);
-    res.json({ ok: true, mensagem: `✅ Cor da borda de ${nomeUsuario} alterada para ${corId}!` });
+    console.log(`[BORDA-ADMIN] Admin alterou cor da borda de ${nomeNormalizado} para: ${corId}`);
+    res.json({ ok: true, mensagem: `✅ Cor da borda de ${nomeNormalizado} alterada para ${corId}!` });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -1193,21 +1366,31 @@ app.get("/leaderboard/giros", async (req, res) => {
 app.post("/registrar-compra", autenticar, async (req, res) => {
   try {
     const { itemId, itemNome, preco } = req.body;
+    const itemValido = validarItemId(itemId);
+    const precoValido = normalizarInteiro(preco);
+
+    if (!itemValido) {
+      return res.status(400).json({ ok: false, mensagem: "ID de item inválido!" });
+    }
+
+    if (!Number.isFinite(Number(preco)) || precoValido < 0 || precoValido > 1000000) {
+      return res.status(400).json({ ok: false, mensagem: "Preço inválido!" });
+    }
 
     // Registrar na coleção de compras (log)
     const novaCompra = new Compra({
       usuario: req.usuario.nome,
-      itemId,
-      itemNome,
-      preco
+      itemId: itemValido,
+      itemNome: String(itemNome || itemValido).slice(0, 80),
+      preco: precoValido
     });
     await novaCompra.save();
 
     // Adicionar item ao usuário se ainda não tiver
     const usuario = await Usuario.findOne({ nome: req.usuario.nome });
     if (usuario) {
-      if (!usuario.itensComprados.includes(itemId)) {
-        usuario.itensComprados.push(itemId);
+      if (!usuario.itensComprados.includes(itemValido)) {
+        usuario.itensComprados.push(itemValido);
         await usuario.save();
       }
     }
@@ -1232,7 +1415,7 @@ app.post("/definir-tag", autenticar, async (req, res) => {
   try {
     const { tag } = req.body;
 
-    if (!tag || tag.length < 1 || tag.length > 10) {
+    if (typeof tag !== 'string' || tag.trim().length < 1 || tag.trim().length > 10) {
       return res.status(400).json({ ok: false, mensagem: "Tag deve ter entre 1 e 10 caracteres!" });
     }
 
@@ -1316,9 +1499,9 @@ app.post("/jogos-secretos", autenticar, async (req, res) => {
     const { jogosSecretos } = req.body;
     const lista = Array.isArray(jogosSecretos)
       ? jogosSecretos
+          .map(item => validarJogoId(item))
           .filter(Boolean)
-          .map(item => String(item).trim())
-          .filter(Boolean)
+          .slice(0, MAX_BACKUP_ITEMS)
       : [];
 
     const usuario = await Usuario.findOne({ nome: req.usuario.nome });
@@ -1454,29 +1637,30 @@ app.get("/rank-xp", autenticar, async (req, res) => {
 app.post("/atualizar-xp", autenticar, async (req, res) => {
   try {
     const { quantidade } = req.body;
-    
-    if (!quantidade || quantidade <= 0) {
-      return res.status(400).json({ ok: false, mensagem: "Quantidade de XP inválida!" });
+    const quantidadeInt = normalizarInteiro(quantidade);
+
+    if (!Number.isInteger(quantidade) || quantidadeInt <= 0 || quantidadeInt > MAX_XP_AUMENTO) {
+      return res.status(400).json({ ok: false, mensagem: "Quantidade de XP inválida ou muito alta!" });
     }
-    
+
     const usuario = await Usuario.findOne({ nome: req.usuario.nome });
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
-    
+
     // Aplicar multiplicador Premium (2x)
-    let xpGanho = quantidade;
+    let xpGanho = quantidadeInt;
     if (usuario.premiumXp) {
-      xpGanho = quantidade * 2;
+      xpGanho = quantidadeInt * 2;
     }
-    
+
     const estadoAtual = calcularRankEProgressaoXP(usuario.xp || 0, usuario.rank || 1);
     const progresso = calcularRankEProgressaoXP(estadoAtual.xp + xpGanho, estadoAtual.rank || 1);
     usuario.rank = progresso.rank;
     usuario.xp = progresso.xp;
 
     await usuario.save();
-    
+
     res.json({ 
       ok: true, 
       rank: usuario.rank,
@@ -1521,9 +1705,8 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
   try {
     const { moedas } = req.body;
 
-    // Validar entrada
-    const moedAsInt = parseInt(moedas);
-    if (isNaN(moedAsInt) || moedAsInt < 0) {
+    const moedAsInt = normalizarInteiro(moedas);
+    if (isNaN(Number(moedas)) || moedAsInt < 0) {
       console.error(`[SYNC] Valor de moedas inválido: ${moedas}`);
       return res.status(400).json({ ok: false, mensagem: "Valor de moedas inválido!" });
     }
@@ -1532,6 +1715,12 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
     if (!usuario) {
       console.error(`[SYNC] Usuário não encontrado: ${req.usuario.nome}`);
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    const validacao = validarDelta(moedAsInt, usuario.moedas || 0, MAX_MOEDAS_AUMENTO, "moedas");
+    if (!validacao.ok) {
+      console.warn(`[SYNC] Bloqueado para ${req.usuario.nome}: ${validacao.mensagem}`);
+      return res.status(400).json({ ok: false, mensagem: validacao.mensagem });
     }
 
     usuario.moedas = moedAsInt;
@@ -1560,11 +1749,27 @@ app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
     }
 
     // Sincronizar cada campo se fornecido
-    if (moedas !== undefined && !isNaN(parseInt(moedas))) {
-      usuario.moedas = parseInt(moedas);
+    if (moedas !== undefined) {
+      const moedasInt = normalizarInteiro(moedas);
+      if (isNaN(Number(moedas)) || moedasInt < 0) {
+        return res.status(400).json({ ok: false, mensagem: "Valor de moedas inválido!" });
+      }
+      const validacaoMoedas = validarDelta(moedasInt, usuario.moedas || 0, MAX_MOEDAS_AUMENTO, "moedas");
+      if (!validacaoMoedas.ok) {
+        return res.status(400).json({ ok: false, mensagem: validacaoMoedas.mensagem });
+      }
+      usuario.moedas = moedasInt;
     }
-    if (playtime !== undefined && !isNaN(parseInt(playtime))) {
-      usuario.tempo_jogo = parseInt(playtime);
+    if (playtime !== undefined) {
+      const playtimeInt = normalizarInteiro(playtime);
+      if (isNaN(Number(playtime)) || playtimeInt < 0) {
+        return res.status(400).json({ ok: false, mensagem: "Tempo de jogo inválido!" });
+      }
+      const validacaoTempo = validarDelta(playtimeInt, usuario.tempo_jogo || 0, MAX_TEMPO_JOGO_AUMENTO, "tempo de jogo");
+      if (!validacaoTempo.ok) {
+        return res.status(400).json({ ok: false, mensagem: validacaoTempo.mensagem });
+      }
+      usuario.tempo_jogo = playtimeInt;
     }
     if (tag !== undefined) {
       usuario.tagPersonalizada = tag;
@@ -1738,7 +1943,12 @@ app.post("/atualizar-tempo-jogo", autenticar, async (req, res) => {
   try {
     const { minutos } = req.body;
     const usuario = await Usuario.findOne({ nome: req.usuario.nome });
-    usuario.tempo_jogo = (usuario.tempo_jogo || 0) + minutos;
+    const minutosInt = normalizarInteiro(minutos);
+    const validacao = validarDelta((usuario.tempo_jogo || 0) + minutosInt, usuario.tempo_jogo || 0, MAX_TEMPO_JOGO_AUMENTO, 'tempo de jogo');
+    if (!validacao.ok) {
+      return res.status(400).json({ ok: false, mensagem: validacao.mensagem });
+    }
+    usuario.tempo_jogo = (usuario.tempo_jogo || 0) + minutosInt;
     await usuario.save();
     res.json({ ok: true, mensagem: "Tempo atualizado!" });
   } catch (err) {
@@ -1765,8 +1975,9 @@ app.get("/user/spins", autenticar, async (req, res) => {
 app.put("/user/spins", autenticar, async (req, res) => {
   try {
     const { spins } = req.body;
+    const spinsInt = normalizarInteiro(spins);
 
-    if (typeof spins !== 'number' || spins < 0) {
+    if (typeof spins !== 'number' && typeof spins !== 'string' || spinsInt < 0) {
       return res.status(400).json({ ok: false, mensagem: "Valor de spins inválido!" });
     }
 
@@ -1775,10 +1986,15 @@ app.put("/user/spins", autenticar, async (req, res) => {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
-    usuario.spins = spins;
+    const validacao = validarDelta(spinsInt, usuario.spins || 0, MAX_SPINS_AUMENTO, "giros");
+    if (!validacao.ok) {
+      return res.status(400).json({ ok: false, mensagem: validacao.mensagem });
+    }
+
+    usuario.spins = spinsInt;
     await usuario.save();
 
-    console.log(`[SPINS] ${req.usuario.nome} agora tem ${spins} giros`);
+    console.log(`[SPINS] ${req.usuario.nome} agora tem ${spinsInt} giros`);
     res.json({ ok: true, spins: usuario.spins });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro ao atualizar spins: " + err.message });

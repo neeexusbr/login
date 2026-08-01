@@ -30,38 +30,67 @@
       margin-bottom: 20px;
     }
     input {
-      width: 75%;
-      padding: 6px;
+      width: 100%;
+      padding: 6px 38px 6px 6px;
       background: linear-gradient(rgb(0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 100%) padding-box padding-box, linear-gradient(rgba(255, 255, 255, 0.25) 0%, rgb(255, 255, 255) 100%) border-box border-box;
       margin: 10px 0;
       color: #f0f0f0;
       border-radius: 6px;
       border: 1px solid #ccc;
       transition: border-color 0.3s;
+      box-sizing: border-box;
+    }
+    .input-with-toggle {
+      position: relative;
+      width: 100%;
+      margin: 10px auto;
+      box-sizing: border-box;
+    }
+    .input-with-toggle input {
+      width: 100%;
+      padding-right: 40px;
+      box-sizing: border-box;
+    }
+    .toggle-password {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .toggle-password img {
+      width: 20px;
+      height: 20px;
     }
     input:focus {
       border-color: #585858;
       outline: none;
     }
     .enter {
-      width: 30%;
+      width: 100%;
+      max-width: 160px;
       padding: 12px;
-      margin-top: 10px;
-      margin-left: 220px;
-      border-radius: 6px;
+      margin: 10px auto 0;
+      display: block;
+      border-radius: 0.4375rem 0.4375rem 0.4375rem 0px;
+      border-top-left-radius: 0.4375rem;
+      border-top-right-radius: 0.4375rem;
+      border-bottom-right-radius: 0.4375rem;
+      border-bottom-left-radius: 0px;
       background-image: url("bg.png");
-      border-image: url("button2.svg") 10 stretch ;
+      border-image: url("button2.svg") 10 stretch;
       border: 0.0625rem solid transparent;
       box-shadow: black 0px 0px 0.3rem 0.1rem inset;
-      border-radius: 0.4375rem 0.4375rem 0.4375rem 0px;
-    border-top-left-radius: 0.4375rem;
-    border-top-right-radius: 0.4375rem;
-    border-bottom-right-radius: 0.4375rem;
-    border-bottom-left-radius: 0px;
-    border-image-width: 0.50rem;
-    border-image-slice: 10;
-    border-image-repeat: unset;
-    border-image-source: url(button2.svg);
+      border-image-width: 0.50rem;
+      border-image-slice: 10;
+      border-image-repeat: unset;
+      border-image-source: url(button2.svg);
       color: #fff;
       font-size: 16px;
       cursor: pointer;
@@ -213,11 +242,6 @@
     <img class="main-img" src="imagens/image.png" alt="Carregando...">
     <img class="loading-img" src="loading.gif" alt="Carregando...">
   </div> -->
-  <div>
-   <button id="hide" onclick="toggleVisible()">
-    <img class="hide-img" src="imagens/show.png" alt="asd">
-  </div>
-
   <div class="container">
     <!-- Formulário de Login -->
     <div class="MainButton"><strong>ENTRAR</strong></div>
@@ -225,7 +249,12 @@
       <div class="toggle" onclick="toggleForms()">Não tem conta? Cadastre-se</div>
       <form id="loginForm" action="/login" method="POST" onsubmit="return false;">
         <input type="text" name="nome" placeholder="Nome" required>
-        <input id="senhaaa" type="password" name="senha" placeholder="Senha" required>
+        <div class="input-with-toggle">
+          <input id="senha-login" type="password" name="senha" placeholder="Senha" required>
+          <button type="button" class="toggle-password" data-target="senha-login" onclick="toggleVisible(event)">
+            <img class="hide-img" src="imagens/show.png" alt="Mostrar senha">
+          </button>
+        </div>
         <button class="enter" type="submit">Entrar</button>
       </form>
   </div>
@@ -236,8 +265,18 @@
       <div class="toggle" onclick="toggleForms()">Já tem conta? Faça login</div>
       <form id="criarForm" action="/registrar" method="POST" onsubmit="return false;">
         <input type="text" name="nome" placeholder="Nome" required>
-        <input id="senhaaa" type="password" name="senha" placeholder="Senha" required>
-        <input id="senhaaa" type="password" name="confirmarsenha" placeholder="Confirmar Senha" required>
+        <div class="input-with-toggle">
+          <input id="senha-register" type="password" name="senha" placeholder="Senha" required>
+          <button type="button" class="toggle-password" data-target="senha-register" onclick="toggleVisible(event)">
+            <img class="hide-img" src="imagens/show.png" alt="Mostrar senha">
+          </button>
+        </div>
+        <div class="input-with-toggle">
+          <input id="confirmar-senha" type="password" name="confirmarsenha" placeholder="Confirmar Senha" required>
+          <button type="button" class="toggle-password" data-target="confirmar-senha" onclick="toggleVisible(event)">
+            <img class="hide-img" src="imagens/show.png" alt="Mostrar senha">
+          </button>
+        </div>
         <button class="enter" type="submit">Registrar</button>
       </form>
       
@@ -265,15 +304,21 @@
       document.getElementById("registerSection").classList.toggle("hidden");
     }
 
-    function toggleVisible() {
-      const hide = document.querySelector(".hide-img");
-      const input = document.getElementById("senhaaa");
-      if (hide.src.includes('show.png')) {
-        hide.src = 'imagens/hide.png'
-        input.type = "text"
+    function toggleVisible(event) {
+      const button = event.currentTarget;
+      const targetId = button.dataset.target;
+      const input = document.getElementById(targetId);
+      const icon = button.querySelector('.hide-img');
+      if (!input || !icon) return;
+
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.src = 'imagens/hide.png';
+        icon.alt = 'Ocultar senha';
       } else {
-        hide.src = 'imagens/show.png'
-        input.type = "password"
+        input.type = 'password';
+        icon.src = 'imagens/show.png';
+        icon.alt = 'Mostrar senha';
       }
     }
 
@@ -504,7 +549,28 @@ document.getElementById("criarForm").addEventListener("submit", async e => {
     alert("A Senha não coincide!")
     return;
   }
+  // 1. Regex de caracteres permitidos (incluindo espaço)
+const temCaractereInvalido = /[^a-zA-Z0-9_\.-]/;
+
+// 2. Regex para detectar símbolos repetidos em sequência (.., --, __)
+const temSimboloSeguido = /(\.{2,}|-{2,}|_{2,})/;
+
+if (nome.length < 3 || nome.length > 20) {
+  alert("Seu nome deve ter entre 3 e 20 caracteres.");
+  return;
+}
+
+if (temCaractereInvalido.test(nome)) {
+  alert("Seu nome contém caracteres inválidos. Apenas letras, números, espaços, _, - e . são permitidos.");
+  return;
+}
+
+if (temSimboloSeguido.test(nome)) {
+  alert("Seu nome não pode conter pontos, hífens ou underscores seguidos.");
+  return;
+}
   submitAnimation();
+
   const resposta = await enviarDados(`${API_URL}/registrar`, { nome, senha });
 
   alert(resposta.mensagem || resposta);
