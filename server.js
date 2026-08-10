@@ -61,6 +61,10 @@ const Usuario = mongoose.model('Usuario', new mongoose.Schema({
   corTagPersonalizada: { type: String, default: '#a855f7' }, // roxo padrão
   tipoCorTag: { type: String, default: 'comum' }, // 'comum' ou 'especial'
   foto_perfil: { type: String, default: '' },
+  bio: { type: String, default: '' },
+  infiniteCoins: { type: Boolean, default: false },
+  infiniteSpins: { type: Boolean, default: false },
+  lastDailyRewardDate: { type: String, default: null },
   corBordaPerfil: { type: String, default: '#ffd700' }, // cor da borda do perfil
   idCorBordaPerfil: { type: String, default: 'gold' }, // id da cor de borda selecionada
   rank: { type: Number, default: 1 }, // Rank do usuário (1-30)
@@ -401,6 +405,37 @@ app.post("/admin/adicionar-moedas", autenticar, verificarAdmin, async (req, res)
       solicitacaoId: solicitacao._id,
       isPendente: true
     });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
+  }
+});
+
+app.post("/admin/definir-infinito", autenticar, async (req, res) => {
+  try {
+    if (req.usuario.nome !== "Dogue") {
+      return res.status(403).json({ ok: false, mensagem: "❌ Apenas Dogue pode definir status infinito!" });
+    }
+
+    const { nomeUsuario, tipo, ativo } = req.body;
+    if (!nomeUsuario || !['moedas', 'giros', 'ambos'].includes(tipo)) {
+      return res.status(400).json({ ok: false, mensagem: "Informe nome e tipo válido (moedas, giros ou ambos)." });
+    }
+
+    const usuario = await Usuario.findOne({ nome: nomeUsuario });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    const ativar = Boolean(ativo);
+    if (tipo === 'moedas' || tipo === 'ambos') {
+      usuario.infiniteCoins = ativar;
+    }
+    if (tipo === 'giros' || tipo === 'ambos') {
+      usuario.infiniteSpins = ativar;
+    }
+
+    await usuario.save();
+    res.json({ ok: true, mensagem: `✅ Status infinito atualizado para ${nomeUsuario}!`, infiniteCoins: usuario.infiniteCoins, infiniteSpins: usuario.infiniteSpins });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro: " + err.message });
   }
@@ -1083,13 +1118,15 @@ app.post("/admin/remover-head-admin", autenticar, verificarDogue, async (req, re
 // === ENDPOINTS DE LEADERBOARD ===
 app.get("/leaderboard", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
       .sort({ tempo_jogo: -1 })
       .limit(20)
       .lean(); // Converter para objeto puro do JavaScript
 
+    const usuariosVisiveis = usuarios.filter(user => !user.infiniteCoins && !user.infiniteSpins);
+
     // Distribuir prêmios
-    const usuariosComPremio = usuarios.map((user, index) => {
+    const usuariosComPremio = usuariosVisiveis.map((user, index) => {
       let premio = 0;
       if (index === 0) premio = 10000;
       else if (index === 1) premio = 5000;
@@ -1130,6 +1167,10 @@ app.get("/leaderboard/rank", async (req, res) => {
         nome: 1, 
         moedas: 1, 
         foto_perfil: 1, 
+        bio: 1,
+        infiniteCoins: 1,
+        infiniteSpins: 1,
+        lastDailyRewardDate: 1,
         tagPersonalizada: 1, 
         corTagPersonalizada: 1, 
         tipoCorTag: 1, 
@@ -1146,8 +1187,10 @@ app.get("/leaderboard/rank", async (req, res) => {
       .limit(20)
       .lean();
 
+    const usuariosVisiveis = usuarios.filter(user => !user.infiniteCoins && !user.infiniteSpins);
+
     // Distribuir prêmios baseado no rank de XP
-    const usuariosComPremio = usuarios.map((user, index) => {
+    const usuariosComPremio = usuariosVisiveis.map((user, index) => {
       let premio = 0;
       if (index === 0) premio = 5000;
       else if (index === 1) premio = 3000;
@@ -1183,13 +1226,15 @@ app.get("/leaderboard/rank", async (req, res) => {
 // === LEADERBOARD DE MOEDAS ===
 app.get("/leaderboard/moedas", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
       .sort({ moedas: -1 })
       .limit(20)
       .lean();
 
+    const usuariosVisiveis = usuarios.filter(user => !user.infiniteCoins && !user.infiniteSpins);
+
     // Distribuir prêmios baseado em moedas
-    const usuariosComPremio = usuarios.map((user, index) => {
+    const usuariosComPremio = usuariosVisiveis.map((user, index) => {
       let premio = 0;
       if (index === 0) premio = 5000;
       else if (index === 1) premio = 3000;
@@ -1225,13 +1270,15 @@ app.get("/leaderboard/moedas", async (req, res) => {
 // === LEADERBOARD DE GIROS ===
 app.get("/leaderboard/giros", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
       .sort({ spins: -1 })
       .limit(20)
       .lean();
 
+    const usuariosVisiveis = usuarios.filter(user => !user.infiniteCoins && !user.infiniteSpins);
+
     // Distribuir prêmios baseado em giros
-    const usuariosComPremio = usuarios.map((user, index) => {
+    const usuariosComPremio = usuariosVisiveis.map((user, index) => {
       let premio = 0;
       if (index === 0) premio = 20;
       else if (index === 1) premio = 15;
@@ -1325,7 +1372,7 @@ app.post("/definir-tag", autenticar, async (req, res) => {
 // === ENDPOINT PARA OBTER DADOS DO USUÁRIO ===
 app.get("/dados-usuario", autenticar, async (req, res) => {
   try {
-    const usuario = await Usuario.findOne({ nome: req.usuario.nome }, { nome: 1, moedas: 1, foto_perfil: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, tempo_jogo: 1, _id: 0 });
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome }, { nome: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, tempo_jogo: 1, _id: 0 });
 
     if (!usuario) {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
@@ -1337,6 +1384,10 @@ app.get("/dados-usuario", autenticar, async (req, res) => {
         nome: usuario.nome,
         moedas: parseInt(usuario.moedas) || 0,
         foto_perfil: usuario.foto_perfil || '',
+        bio: usuario.bio || '',
+        infiniteCoins: !!usuario.infiniteCoins,
+        infiniteSpins: !!usuario.infiniteSpins,
+        lastDailyRewardDate: usuario.lastDailyRewardDate || null,
         tagPersonalizada: usuario.tagPersonalizada || '',
         corTagPersonalizada: usuario.corTagPersonalizada || '#a855f7',
         tipoCorTag: usuario.tipoCorTag || 'comum',
@@ -1634,7 +1685,7 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
 // === ENDPOINT PARA SINCRONIZAR DADOS SIMPLES ===
 app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
   try {
-    const { moedas, playtime, tag, tagColor, tagColorType, fotoPerfil, lastDailyRewardDate } = req.body;
+    const { moedas, playtime, tag, tagColor, tagColorType, fotoPerfil, bio, lastDailyRewardDate, infiniteCoins, infiniteSpins } = req.body;
 
     const usuario = await Usuario.findOne({ nome: req.usuario.nome });
     if (!usuario) {
@@ -1676,6 +1727,18 @@ app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
     if (fotoPerfil !== undefined) {
       usuario.foto_perfil = fotoPerfil;
     }
+    if (bio !== undefined) {
+      usuario.bio = String(bio).slice(0, 500);
+    }
+    if (lastDailyRewardDate !== undefined) {
+      usuario.lastDailyRewardDate = lastDailyRewardDate || null;
+    }
+    if (infiniteCoins !== undefined) {
+      usuario.infiniteCoins = Boolean(infiniteCoins);
+    }
+    if (infiniteSpins !== undefined) {
+      usuario.infiniteSpins = Boolean(infiniteSpins);
+    }
 
     await usuario.save();
 
@@ -1689,7 +1752,11 @@ app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
         tagPersonalizada: usuario.tagPersonalizada,
         corTagPersonalizada: usuario.corTagPersonalizada,
         tipoCorTag: usuario.tipoCorTag,
-        foto_perfil: usuario.foto_perfil
+        foto_perfil: usuario.foto_perfil,
+        bio: usuario.bio || '',
+        infiniteCoins: !!usuario.infiniteCoins,
+        infiniteSpins: !!usuario.infiniteSpins,
+        lastDailyRewardDate: usuario.lastDailyRewardDate || null
       }
     });
   } catch (err) {
@@ -1715,7 +1782,11 @@ app.get("/carregar-dados-simples", autenticar, async (req, res) => {
         tag: usuario.tagPersonalizada,
         tagColor: usuario.corTagPersonalizada,
         tagColorType: usuario.tipoCorTag,
-        fotoPerfil: usuario.foto_perfil
+        fotoPerfil: usuario.foto_perfil,
+        bio: usuario.bio || '',
+        infiniteCoins: !!usuario.infiniteCoins,
+        infiniteSpins: !!usuario.infiniteSpins,
+        lastDailyRewardDate: usuario.lastDailyRewardDate || null
       }
     });
   } catch (err) {
@@ -2217,6 +2288,7 @@ app.post("/chat/enviar-global", autenticar, async (req, res) => {
     if (mensagem.length > 500) {
       return res.status(400).json({ ok: false, mensagem: "Mensagem muito longa (máx: 500 caracteres)!" });
     }
+
 
     const novaMensagem = new MensagemGlobal({
       usuario: req.usuario.nome,
