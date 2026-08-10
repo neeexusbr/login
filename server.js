@@ -226,6 +226,70 @@ app.post("/login", async (req, res) => {
   }
 });
 
+app.post("/trocar-senha", autenticar, async (req, res) => {
+  try {
+    const { senhaAtual, novaSenha } = req.body;
+    const conta = await Usuario.findOne({ nome: req.usuario.nome });
+
+    if (!conta) {
+      return res.status(404).json({ ok: false, mensagem: "Conta não encontrada." });
+    }
+
+    if (!senhaAtual || !novaSenha) {
+      return res.status(400).json({ ok: false, mensagem: "Senha atual e nova senha são obrigatórias." });
+    }
+
+    const senhaValida = await bcrypt.compare(senhaAtual, conta.senha);
+    if (!senhaValida) {
+      return res.status(401).json({ ok: false, mensagem: "Senha atual incorreta." });
+    }
+
+    if (String(novaSenha).length < 4) {
+      return res.status(400).json({ ok: false, mensagem: "A nova senha deve ter pelo menos 4 caracteres." });
+    }
+
+    conta.senha = await bcrypt.hash(String(novaSenha), 10);
+    await conta.save();
+
+    res.json({ ok: true, mensagem: "Senha alterada com sucesso!" });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao trocar senha: " + err.message });
+  }
+});
+
+app.post("/trocar-nome", autenticar, async (req, res) => {
+  try {
+    const { nome } = req.body;
+    const novoNome = String(nome || '').trim();
+
+    if (!novoNome) {
+      return res.status(400).json({ ok: false, mensagem: "Informe um nome válido." });
+    }
+
+    if (novoNome.length > 20) {
+      return res.status(400).json({ ok: false, mensagem: "O nome deve ter no máximo 20 caracteres." });
+    }
+
+    const conta = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!conta) {
+      return res.status(404).json({ ok: false, mensagem: "Conta não encontrada." });
+    }
+
+    const nomeExistente = await Usuario.findOne({ nome: novoNome });
+    if (nomeExistente && nomeExistente._id.toString() !== conta._id.toString()) {
+      return res.status(400).json({ ok: false, mensagem: "Esse nome de usuário já está em uso." });
+    }
+
+    conta.nome = novoNome;
+    await conta.save();
+
+    const token = jwt.sign({ nome: conta.nome, isAdmin: conta.isAdmin }, SECRET, { expiresIn: "30d" });
+    res.json({ ok: true, mensagem: "Nome alterado com sucesso!", token });
+  } catch (err) {
+    res.status(500).json({ ok: false, mensagem: "Erro ao trocar nome: " + err.message });
+  }
+});
+
 function autenticar(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
