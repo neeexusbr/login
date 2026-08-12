@@ -1484,6 +1484,66 @@ app.get("/itens-comprados", autenticar, async (req, res) => {
   }
 });
 
+// === ENDPOINT PARA SINCRONIZAR ITENS E BORDA DO USUÁRIO ===
+app.post("/sincronizar-itens", autenticar, async (req, res) => {
+  try {
+    const { itensComprados, corBordaPerfil, idCorBordaPerfil } = req.body;
+
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    const listaItens = Array.isArray(itensComprados)
+      ? [...new Set(itensComprados.filter(Boolean).map(item => String(item).trim()).filter(Boolean))]
+      : [...(usuario.itensComprados || [])];
+
+    usuario.itensComprados = listaItens;
+
+    if (corBordaPerfil !== undefined) {
+      usuario.corBordaPerfil = String(corBordaPerfil);
+    }
+
+    if (idCorBordaPerfil !== undefined) {
+      const escolha = String(idCorBordaPerfil).trim();
+      const CORES_MAPEAMENTO = {
+        'silver': '#c0c0c0',
+        'red': '#ff0000',
+        'blue': '#0000ff',
+        'green': '#22c55e',
+        'orange': '#ff8a00',
+        'yellow': '#ffff00',
+        'lime': '#00ff00',
+        'gold': '#ffd700',
+        'purple': '#a855f7',
+        'cyan': '#00d4ff',
+        'pink': '#ff00cc',
+        'lime-glow': '#39ff14',
+        'sky-blue': '#87ceeb',
+        'rainbow': 'linear-gradient(90deg, #ff0000, #ff8000, #ffff00, #00ff00, #00ffff, #0000ff, #8000ff, #ff0000)'
+      };
+
+      if (CORES_MAPEAMENTO[escolha]) {
+        usuario.idCorBordaPerfil = escolha;
+        usuario.corBordaPerfil = CORES_MAPEAMENTO[escolha];
+      }
+    }
+
+    await usuario.save();
+
+    res.json({
+      ok: true,
+      mensagem: "Itens e borda sincronizados com sucesso!",
+      itens: usuario.itensComprados || [],
+      corBordaPerfil: usuario.corBordaPerfil || '#ffd700',
+      idCorBordaPerfil: usuario.idCorBordaPerfil || 'gold'
+    });
+  } catch (err) {
+    console.error('[SYNC-ITENS] Erro ao sincronizar itens:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao sincronizar itens: " + err.message });
+  }
+});
+
 // === ENDPOINT PARA OBTER E SINCRONIZAR JOGOS SECRETOS ===
 app.get("/jogos-secretos", autenticar, async (req, res) => {
   try {
