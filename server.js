@@ -2637,8 +2637,8 @@ app.post("/admin/mudar-xp-rank", autenticar, verificarDogue, async (req, res) =>
     const novoRankNum = parseInt(novoRank);
     const novoXpNum = parseInt(novoXp);
 
-    if (isNaN(novoRankNum) || novoRankNum < 1 || novoRankNum > 30) {
-      return res.status(400).json({ ok: false, mensagem: "Rank deve ser entre 1 e 30!" });
+    if (isNaN(novoRankNum) || novoRankNum < 1) {
+      return res.status(400).json({ ok: false, mensagem: "Rank deve ser maior que 1" });
     }
 
     if (isNaN(novoXpNum) || novoXpNum < 0) {
