@@ -1420,7 +1420,9 @@ app.post("/definir-tag", autenticar, async (req, res) => {
     const { tag } = req.body;
 
     if (!tag || tag.length < 1 || tag.length > 10) {
+      if (!req.usuario.isAdmin) {
       return res.status(400).json({ ok: false, mensagem: "Tag deve ter entre 1 e 10 caracteres!" });
+      }
     }
 
     const usuario = await Usuario.findOne({ nome: req.usuario.nome });
@@ -1718,8 +1720,17 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
 
     // Aplicar multiplicador Premium (2x)
     let xpGanho = quantidadeInt;
-    if (usuario.premiumXp) {
+
+    if (usuario.itensComprados.includes('premium-xp')) {
       xpGanho = quantidadeInt * 2;
+      if (usuario.itensComprados.includes('ultra-xp')) {
+       xpGanho = quantidadeInt * 4;
+      }
+    } else if (usuario.itensComprados.includes('ultra-xp')) {
+      xpGanho = quantidadeInt * 4;
+      if (usuario.itensComprados.includes('premium-xp')) {
+       xpGanho = quantidadeInt * 2;
+      }
     }
 
     const estadoAtual = calcularRankEProgressaoXP(usuario.xp || 0, usuario.rank || 1);
