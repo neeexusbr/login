@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { json } = require('body-parser');
-const mercadopago = require('mercadopago');
+const { MercadoPagoConfig, Payment, Preference } = require('mercadopago');
 require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
