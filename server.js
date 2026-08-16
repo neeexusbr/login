@@ -44,10 +44,27 @@ app.use(cors({
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Configura Mercado Pago (usa as variáveis de ambiente MERCADO_PAGO_ACCESS_TOKEN ou MP_ACCESS_TOKEN)
-const MP_TOKEN = process.env.MP_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN;
+// Configura Mercado Pago (usa as variáveis de ambiente)
+const MP_TOKEN = process.env.MP_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN;
+
+// Declara as variáveis no escopo global/módulo
+let client, paymentClient, preferenceClient;
+
 if (MP_TOKEN) {
-  mercadopago.configure({ access_token: MP_TOKEN });
+  try {
+    // Instancia a configuração usando o MP_TOKEN já capturado
+    client = new MercadoPagoConfig({ 
+      accessToken: MP_TOKEN 
+    });
+
+    // Inicializa os serviços
+    paymentClient = new Payment(client);
+    preferenceClient = new Preference(client);
+
+    console.log('✅ Mercado Pago configurado com sucesso!');
+  } catch (e) {
+    console.warn('Não foi possível configurar Mercado Pago:', e && e.message ? e.message : e);
+  }
 } else {
   console.warn('Aviso: token do Mercado Pago não encontrado em variáveis de ambiente. Rota /api/pagamento exigirá configuração.');
 }
@@ -2857,7 +2874,7 @@ const paymentData = {
         auto_return: 'approved'
       };
 
-      const pref = await mercadopago.preferences.create(preference);
+      const pref = await preferenceClient.create({ body: preference });
 
       try {
         const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: preference.items[0].title, preco: Number(amount) });
@@ -3134,7 +3151,7 @@ app.post("/api/pagamento", async (req, res) => {
         }
       };
 
-      const response = await mercadopago.payment.create(paymentData);
+      const response = await paymentClient.create({ body: paymentData });
       const body = response && response.body ? response.body : response;
       const txn = (body.point_of_interaction && body.point_of_interaction.transaction_data) ? body.point_of_interaction.transaction_data : {};
 
@@ -3235,7 +3252,7 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
     // Verifica se a notificação é de um pagamento
     if (type === 'payment' && data && data.id) {
       // Busca os detalhes atualizados do pagamento na API do MP
-      const paymentResponse = await mercadopago.payment.get(data.id);
+    const paymentResponse = await paymentClient.get({ id: data.id });
       const payment = paymentResponse.body;
 
       // Se o pagamento foi APROVADO
