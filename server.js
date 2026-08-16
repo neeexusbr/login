@@ -2782,118 +2782,8 @@ app.post("/admin/mudar-xp-rank", autenticar, verificarDogue, async (req, res) =>
   }
 });
 
-// Rota de pagamento integrando com Mercado Pago
-app.post('/api/pagamento', async (req, res) => {
-  const { user, email, amount, method, items } = req.body || {};
-
-  if (!amount || !method) return res.status(400).json({ message: 'Parâmetros inválidos: amount e method são obrigatórios.' });
-
-  try {
-    if (!MP_TOKEN) return res.status(500).json({ message: 'Token do Mercado Pago não configurado no servidor.' });
-
-    // Fluxo PIX
-    if (method === 'pix') {
-     // Exemplo de como incluir no payload do PIX / Boleto:
-const paymentData = {
-  transaction_amount: Number(amount),
-  description: descricaoCompra,
-  payment_method_id: 'pix',
-  payer: {
-    email: email,
-    first_name: user
-  },
-  // Metadados lidos pelo Webhook após aprovação
-  metadata: {
-    usuario: user,
-    items: items
-  }
-};
-
-      const response = await mercadopago.payment.create(paymentData);
-      const body = response && response.body ? response.body : response;
-      const txn = (body.point_of_interaction && body.point_of_interaction.transaction_data) ? body.point_of_interaction.transaction_data : {};
-
-      // Registra compra no banco (rastreio)
-      try {
-        const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: paymentData.description, preco: Number(amount) });
-        await compra.save();
-      } catch (e) { console.warn('Não foi possível salvar Compra:', e.message); }
-
-      return res.json({ qrCodeBase64: txn.qr_code_base64 || null, pixCopiaECola: txn.qr_code || txn.qr_code_text || null });
-    }
-
-    // Fluxo BOLETO
-    if (method === 'boleto') {
-      const payer = {
-        email: email || 'cliente@nao-fornecido',
-        first_name: user || 'Cliente',
-        identification: {
-          type: 'CPF',
-          number: (req.body.cpf || '').replace(/\D/g, '') || '00000000000'
-        }
-      };
-
-      const paymentData = {
-        transaction_amount: Number(amount),
-        description: (items && items.length) ? items.map(i => i.name).join(', ') : 'Compra na loja',
-        payment_method_id: 'bolbradesco',
-        payer,
-      };
-
-      const response = await mercadopago.payment.create(paymentData);
-      const body = response && response.body ? response.body : response;
-      const url = body.point_of_interaction && body.point_of_interaction.transaction_data && body.point_of_interaction.transaction_data.external_resource_url
-        ? body.point_of_interaction.transaction_data.external_resource_url
-        : (body.transaction_details && body.transaction_details.external_resource_url) || null;
-
-      try {
-        const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: paymentData.description, preco: Number(amount) });
-        await compra.save();
-      } catch (e) { console.warn('Não foi possível salvar Compra:', e.message); }
-
-      return res.json({ boletoUrl: url });
-    }
-
-    // Fluxo CARTÃO (cria preference e retorna link de checkout)
-    if (method === 'card') {
-      const preference = {
-        items: [
-          {
-            title: (items && items.length) ? items[0].name : 'Compra na loja',
-            quantity: 1,
-            currency_id: 'BRL',
-            unit_price: Number(amount)
-          }
-        ],
-        payer: { email: email || 'cliente@nao-fornecido' },
-        back_urls: {
-          success: process.env.SUCCESS_URL || 'https://example.com/success',
-          failure: process.env.FAILURE_URL || 'https://example.com/failure',
-          pending: process.env.PENDING_URL || 'https://example.com/pending'
-        },
-        auto_return: 'approved'
-      };
-
-      const pref = await preferenceClient.create({ body: preference });
-
-      try {
-        const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: preference.items[0].title, preco: Number(amount) });
-        await compra.save();
-      } catch (e) { console.warn('Não foi possível salvar Compra:', e.message); }
-
-      return res.json({ init_point: pref.body.init_point, sandbox_init_point: pref.body.sandbox_init_point, success: true });
-    }
-
-    return res.status(400).json({ message: 'Método de pagamento não suportado.' });
-  } catch (err) {
-    console.error('Erro na rota /api/pagamento:', err);
-    return res.status(500).json({ message: err.message || 'Erro interno ao processar pagamento.' });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`✅ Servidor rodando na porta ${PORT}`);
-});
+// A rota de pagamento foi substituída por uma implementação mais completa
+// mais abaixo no arquivo (busque por `app.post("/api/pagamento"`).
 
 function isUserOnline(usuario) {
   if (!usuario?.lastSeenAt) return false;
@@ -3275,4 +3165,8 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
     console.error('Erro ao processar Webhook do Mercado Pago:', err);
     res.sendStatus(500);
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ Servidor rodando na porta ${PORT}`);
 });
