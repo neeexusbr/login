@@ -1869,11 +1869,6 @@ app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
         return res.status(400).json({ ok: false, mensagem: validacaoMoedas.mensagem });
       }
 
-      if (Array.isArray(req.usuario.itensComprados) && req.usuario.itensComprados.includes('ultra-xp')) {
-        usuario.moedas = moedasInt * 2;
-      } else {
-        usuario.moedas = moedasInt;
-      }
     }
     if (playtime !== undefined) {
       const playtimeInt = normalizarInteiro(playtime);
