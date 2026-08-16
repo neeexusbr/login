@@ -3,6 +3,9 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const { json } = require('body-parser');
+const mercadopago = require('mercadopago');
+require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || "stevejobs"; // use variável de ambiente no Render
@@ -40,6 +43,14 @@ app.use(cors({
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
+
+// Configura Mercado Pago (usa as variáveis de ambiente MERCADO_PAGO_ACCESS_TOKEN ou MP_ACCESS_TOKEN)
+const MP_TOKEN = process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN;
+if (MP_TOKEN) {
+  mercadopago.configure({ access_token: MP_TOKEN });
+} else {
+  console.warn('Aviso: token do Mercado Pago não encontrado em variáveis de ambiente. Rota /api/pagamento exigirá configuração.');
+}
 
 //MongoDB
 mongoose.connect("mongodb+srv://Admin:cleusaaposentou@nexusgames.96iuubq.mongodb.net/?appName=nexusgames")
@@ -1718,20 +1729,16 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
-    // Aplicar multiplicador Premium (2x)
-    let xpGanho = quantidadeInt;
+    let multiplicador = 1;
 
-    if (usuario.itensComprados.includes('premium-xp')) {
-      xpGanho = quantidadeInt * 2;
-      if (usuario.itensComprados.includes('ultra-xp')) {
-       xpGanho = quantidadeInt * 4;
-      }
-    } else if (usuario.itensComprados.includes('ultra-xp')) {
-      xpGanho = quantidadeInt * 4;
-      if (usuario.itensComprados.includes('premium-xp')) {
-       xpGanho = quantidadeInt * 2;
-      }
-    }
+if (usuario.itensComprados.includes('premium-xp')) {
+    multiplicador *= 2;
+}
+if (usuario.itensComprados.includes('ultra-xp')) {
+    multiplicador *= 4;
+}
+
+let xpGanho = quantidadeInt * multiplicador;
 
     const estadoAtual = calcularRankEProgressaoXP(usuario.xp || 0, usuario.rank || 1);
     const progresso = calcularRankEProgressaoXP(estadoAtual.xp + xpGanho, estadoAtual.rank || 1);
@@ -1801,8 +1808,15 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
       console.warn(`[SYNC] Bloqueado para ${req.usuario.nome}: ${validacao.mensagem}`);
       return res.status(400).json({ ok: false, mensagem: validacao.mensagem });
     }
-
-    usuario.moedas = moedAsInt;
+    
+    // Verifica se tem o ultra premium
+    
+    if (req.usuario.itensComprados.includes('ultra-xp')) {
+      usuario.moedas = moedAsInt * 2;
+    } else {
+      usuario.moedas = moedAsInt;
+    }
+    
     await usuario.save();
 
     console.log(`[SYNC] ✅ Moedas sincronizadas para ${req.usuario.nome}: ${moedAsInt}`);
@@ -1837,7 +1851,12 @@ app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
       if (!validacaoMoedas.ok) {
         return res.status(400).json({ ok: false, mensagem: validacaoMoedas.mensagem });
       }
-      usuario.moedas = moedasInt;
+
+      if (req.usuario.itensComprados.includes('ultra-xp')) {
+       usuario.moedas = moedAsInt * 2;
+      } else {
+       usuario.moedas = moedAsInt;
+      }
     }
     if (playtime !== undefined) {
       const playtimeInt = normalizarInteiro(playtime);
@@ -2746,6 +2765,115 @@ app.post("/admin/mudar-xp-rank", autenticar, verificarDogue, async (req, res) =>
   }
 });
 
+// Rota de pagamento integrando com Mercado Pago
+app.post('/api/pagamento', async (req, res) => {
+  const { user, email, amount, method, items } = req.body || {};
+
+  if (!amount || !method) return res.status(400).json({ message: 'Parâmetros inválidos: amount e method são obrigatórios.' });
+
+  try {
+    if (!MP_TOKEN) return res.status(500).json({ message: 'Token do Mercado Pago não configurado no servidor.' });
+
+    // Fluxo PIX
+    if (method === 'pix') {
+     // Exemplo de como incluir no payload do PIX / Boleto:
+const paymentData = {
+  transaction_amount: Number(amount),
+  description: descricaoCompra,
+  payment_method_id: 'pix',
+  payer: {
+    email: email,
+    first_name: user
+  },
+  // Metadados lidos pelo Webhook após aprovação
+  metadata: {
+    usuario: user,
+    items: items
+  }
+};
+
+      const response = await mercadopago.payment.create(paymentData);
+      const body = response && response.body ? response.body : response;
+      const txn = (body.point_of_interaction && body.point_of_interaction.transaction_data) ? body.point_of_interaction.transaction_data : {};
+
+      // Registra compra no banco (rastreio)
+      try {
+        const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: paymentData.description, preco: Number(amount) });
+        await compra.save();
+      } catch (e) { console.warn('Não foi possível salvar Compra:', e.message); }
+
+      return res.json({ qrCodeBase64: txn.qr_code_base64 || null, pixCopiaECola: txn.qr_code || txn.qr_code_text || null });
+    }
+
+    // Fluxo BOLETO
+    if (method === 'boleto') {
+      const payer = {
+        email: email || 'cliente@nao-fornecido',
+        first_name: user || 'Cliente',
+        identification: {
+          type: 'CPF',
+          number: (req.body.cpf || '').replace(/\D/g, '') || '00000000000'
+        }
+      };
+
+      const paymentData = {
+        transaction_amount: Number(amount),
+        description: (items && items.length) ? items.map(i => i.name).join(', ') : 'Compra na loja',
+        payment_method_id: 'bolbradesco',
+        payer,
+      };
+
+      const response = await mercadopago.payment.create(paymentData);
+      const body = response && response.body ? response.body : response;
+      const url = body.point_of_interaction && body.point_of_interaction.transaction_data && body.point_of_interaction.transaction_data.external_resource_url
+        ? body.point_of_interaction.transaction_data.external_resource_url
+        : (body.transaction_details && body.transaction_details.external_resource_url) || null;
+
+      try {
+        const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: paymentData.description, preco: Number(amount) });
+        await compra.save();
+      } catch (e) { console.warn('Não foi possível salvar Compra:', e.message); }
+
+      return res.json({ boletoUrl: url });
+    }
+
+    // Fluxo CARTÃO (cria preference e retorna link de checkout)
+    if (method === 'card') {
+      const preference = {
+        items: [
+          {
+            title: (items && items.length) ? items[0].name : 'Compra na loja',
+            quantity: 1,
+            currency_id: 'BRL',
+            unit_price: Number(amount)
+          }
+        ],
+        payer: { email: email || 'cliente@nao-fornecido' },
+        back_urls: {
+          success: process.env.SUCCESS_URL || 'https://example.com/success',
+          failure: process.env.FAILURE_URL || 'https://example.com/failure',
+          pending: process.env.PENDING_URL || 'https://example.com/pending'
+        },
+        auto_return: 'approved'
+      };
+
+      const pref = await mercadopago.preferences.create(preference);
+
+      try {
+        const compra = new Compra({ usuario: user || 'guest', itemId: (items && items[0] && items[0].id) || 'unknown', itemNome: preference.items[0].title, preco: Number(amount) });
+        await compra.save();
+      } catch (e) { console.warn('Não foi possível salvar Compra:', e.message); }
+
+      return res.json({ init_point: pref.body.init_point, sandbox_init_point: pref.body.sandbox_init_point, success: true });
+    }
+
+    return res.status(400).json({ message: 'Método de pagamento não suportado.' });
+  } catch (err) {
+    console.error('Erro na rota /api/pagamento:', err);
+    return res.status(500).json({ message: err.message || 'Erro interno ao processar pagamento.' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);
 });
@@ -2876,5 +3004,258 @@ app.get("/user/alerts", autenticar, async (req, res) => {
     res.json({ ok: true, alert });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro ao obter alertas: " + err.message });
+  }
+});
+
+// Catálogo unificado de preços e tipos
+const CATALOGO = {
+  // Gemas
+  "100-gemas": { price: 1, type: "gemas", quantidade: 100 },
+  "500-gemas": { price: 2.5, type: "gemas", quantidade: 500 },
+  "1000-gemas": { price: 4, type: "gemas", quantidade: 1000 },
+  "2500-gemas": { price: 7, type: "gemas", quantidade: 2500 },
+  "5000-gemas": { price: 10, type: "gemas", quantidade: 5000 },
+  "10000-gemas": { price: 15, type: "gemas", quantidade: 10000 },
+  
+  // Giros
+  "10-giros": { price: 1, type: "giros", quantidade: 10 },
+  "50-giros": { price: 4, type: "giros", quantidade: 50 },
+  "100-giros": { price: 7, type: "giros", quantidade: 100 },
+  "250-giros": { price: 15, type: "giros", quantidade: 250 },
+  "500-giros": { price: 28, type: "giros", quantidade: 500 },
+  
+  // Itens
+  "cor-comum": { price: 1, type: "item" },
+  "cor-especial": { price: 1, type: "item" },
+  "custom-tag": { price: 1, type: "item" },
+  "premium-xp": { price: 5, type: "item" },
+  "ultra-xp": { price: 10, type: "item" },
+  
+  // Serviços
+  "max-rank": { price: 10, type: "special" },
+  "max-rank-premium": { price: 12, type: "special" },
+  "max-rank-ultra": { price: 15, type: "special" },
+  "max-rank-ultra-diamonds": { price: 30, type: "special" }
+};
+
+// Função auxiliar para creditar itens ao usuário no banco
+async function aplicarRecompensas(nomeUsuario, items) {
+  const usuarioDoc = await Usuario.findOne({ nome: nomeUsuario });
+  if (!usuarioDoc) return;
+
+  for (const item of items) {
+    const itemData = CATALOGO[item.id];
+    if (!itemData) continue;
+
+    switch (itemData.type) {
+      case "gemas":
+        usuarioDoc.moedas = (usuarioDoc.moedas || 0) + itemData.quantidade;
+        break;
+
+      case "giros":
+        usuarioDoc.spins = (usuarioDoc.spins || 0) + itemData.quantidade;
+        break;
+
+      case "item":
+        if (!usuarioDoc.ItensComprados) usuarioDoc.ItensComprados = [];
+        usuarioDoc.ItensComprados.push(item.id);
+        break;
+
+      case "special":
+        if (item.id === "max-rank") {
+          usuarioDoc.xp = 2000000;
+        } else if (item.id === "max-rank-premium") {
+          usuarioDoc.xp = 2000000;
+          if (!usuarioDoc.ItensComprados) usuarioDoc.ItensComprados = [];
+          usuarioDoc.ItensComprados.push("premium-xp");
+        } else if (item.id === "max-rank-ultra") {
+          usuarioDoc.xp = 2000000;
+          if (!usuarioDoc.ItensComprados) usuarioDoc.ItensComprados = [];
+          usuarioDoc.ItensComprados.push("ultra-xp");
+        } else if (item.id === "max-rank-ultra-diamonds") {
+          usuarioDoc.xp = 2000000;
+          if (!usuarioDoc.ItensComprados) usuarioDoc.ItensComprados = [];
+          usuarioDoc.ItensComprados.push("ultra-xp");
+          usuarioDoc.moedas = (usuarioDoc.moedas || 0) + 30000;
+        }
+        break;
+    }
+  }
+
+  await usuarioDoc.save();
+}
+
+// ROTA DE PAGAMENTO
+app.post("/api/pagamento", async (req, res) => {
+  try {
+    const { user, email, amount, method, items } = req.body || {};
+
+    // 1. Validação de presença de campos obrigatórios
+    if (!user || !email || !amount || !method || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ ok: false, mensagem: "❌ Informações e parâmetros obrigatórios ausentes!" });
+    }
+
+    if (!MP_TOKEN) {
+      return res.status(500).json({ ok: false, mensagem: "Token do Mercado Pago não configurado no servidor." });
+    }
+
+    // 2. Validação da existência do usuário no Banco de Dados
+    const usuarioExiste = await Usuario.exists({ nome: user });
+    if (!usuarioExiste) {
+      return res.status(404).json({ ok: false, mensagem: "❌ Usuário Não Existe" });
+    }
+
+    // 3. Validação e soma dos preços contra a tabela oficial
+    let totalCalculado = 0;
+    for (const item of items) {
+      const itemCadastrado = CATALOGO[item.id];
+      if (!itemCadastrado) {
+        return res.status(400).json({ ok: false, mensagem: `❌ Item inválido ou não encontrado: ${item.id}` });
+      }
+      totalCalculado += itemCadastrado.price;
+    }
+
+    // Tolerância para divergência de centavos no float
+    if (Math.abs(totalCalculado - Number(amount)) > 0.01) {
+      return res.status(400).json({ ok: false, mensagem: "❌ O valor enviado não corresponde ao total dos itens!" });
+    }
+
+    const descricaoCompra = items.map(i => i.id).join(", ");
+
+    // 4. Fluxo PIX
+    if (method === "pix") {
+      const paymentData = {
+        transaction_amount: Number(amount),
+        description: descricaoCompra,
+        payment_method_id: "pix",
+        payer: {
+          email: email,
+          first_name: user
+        }
+      };
+
+      const response = await mercadopago.payment.create(paymentData);
+      const body = response && response.body ? response.body : response;
+      const txn = (body.point_of_interaction && body.point_of_interaction.transaction_data) ? body.point_of_interaction.transaction_data : {};
+
+      // Registro do log da compra
+      try {
+        const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
+        await compra.save();
+      } catch (e) {
+        console.warn("Não foi possível salvar log de Compra:", e.message);
+      }
+
+      return res.json({
+        ok: true,
+        qrCodeBase64: txn.qr_code_base64 || null,
+        pixCopiaECola: txn.qr_code || txn.qr_code_text || null
+      });
+    }
+
+    // 5. Fluxo BOLETO
+    if (method === "boleto") {
+      const paymentData = {
+        transaction_amount: Number(amount),
+        description: descricaoCompra,
+        payment_method_id: "bolbradesco",
+        payer: {
+          email: email,
+          first_name: user,
+          identification: {
+            type: "CPF",
+            number: (req.body.cpf || "").replace(/\D/g, "") || "00000000000"
+          }
+        }
+      };
+
+      const response = await mercadopago.payment.create(paymentData);
+      const body = response && response.body ? response.body : response;
+      const url = body.point_of_interaction && body.point_of_interaction.transaction_data && body.point_of_interaction.transaction_data.external_resource_url
+        ? body.point_of_interaction.transaction_data.external_resource_url
+        : (body.transaction_details && body.transaction_details.external_resource_url) || null;
+
+      try {
+        const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
+        await compra.save();
+      } catch (e) {
+        console.warn("Não foi possível salvar log de Compra:", e.message);
+      }
+
+      return res.json({ ok: true, boletoUrl: url });
+    }
+
+    // 6. Fluxo CARTÃO (Gera Preference do Checkout)
+    if (method === "card") {
+      const preference = {
+        items: items.map(i => ({
+          title: i.id,
+          quantity: 1,
+          currency_id: "BRL",
+          unit_price: CATALOGO[i.id].price
+        })),
+        payer: { email: email },
+        back_urls: {
+          success: process.env.SUCCESS_URL || "https://example.com/success",
+          failure: process.env.FAILURE_URL || "https://example.com/failure",
+          pending: process.env.PENDING_URL || "https://example.com/pending"
+        },
+        auto_return: "approved"
+      };
+
+      const pref = await mercadopago.preferences.create(preference);
+
+      try {
+        const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
+        await compra.save();
+      } catch (e) {
+        console.warn("Não foi possível salvar log de Compra:", e.message);
+      }
+
+      return res.json({
+        ok: true,
+        init_point: pref.body.init_point,
+        sandbox_init_point: pref.body.sandbox_init_point
+      });
+    }
+
+    return res.status(400).json({ ok: false, mensagem: "Método de pagamento não suportado." });
+
+  } catch (err) {
+    console.error("Erro na rota /api/pagamento:", err);
+    return res.status(500).json({ ok: false, mensagem: "Falha ao processar compra: " + err.message });
+  }
+});
+
+// Rota para receber notificações assíncronas do Mercado Pago
+app.post('/api/webhooks/mercadopago', async (req, res) => {
+  try {
+    const { type, data } = req.body;
+
+    // Verifica se a notificação é de um pagamento
+    if (type === 'payment' && data && data.id) {
+      // Busca os detalhes atualizados do pagamento na API do MP
+      const paymentResponse = await mercadopago.payment.get(data.id);
+      const payment = paymentResponse.body;
+
+      // Se o pagamento foi APROVADO
+      if (payment.status === 'approved') {
+        // Recupera os dados salvos nas métricas/metadados
+        const usuarioNome = payment.metadata?.usuario;
+        const itemsComprados = payment.metadata?.items;
+
+        if (usuarioNome && itemsComprados) {
+          // Entrega os itens no banco de dados
+          await aplicarRecompensas(usuarioNome, itemsComprados);
+          console.log(`✅ Recompensas entregues com sucesso para ${usuarioNome}!`);
+        }
+      }
+    }
+
+    // Responde 200 OK para o Mercado Pago saber que você recebeu a notificação
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Erro ao processar Webhook do Mercado Pago:', err);
+    res.sendStatus(500);
   }
 });
