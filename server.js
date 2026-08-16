@@ -45,7 +45,7 @@ app.use(cors({
 }));
 
 // Configura Mercado Pago (usa as variáveis de ambiente MERCADO_PAGO_ACCESS_TOKEN ou MP_ACCESS_TOKEN)
-const MP_TOKEN = process.env.MP_ACCESS_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN;
+const MP_TOKEN = process.env.MP_TOKEN || process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN;
 if (MP_TOKEN) {
   mercadopago.configure({ access_token: MP_TOKEN });
 } else {
