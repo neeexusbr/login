@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
@@ -5,7 +6,6 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { json } = require('body-parser');
 const { MercadoPagoConfig, Payment, Preference } = require('mercadopago');
-require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET = process.env.JWT_SECRET || "stevejobs"; // use variável de ambiente no Render
@@ -3003,7 +3003,8 @@ app.post("/api/pagamento", async (req, res) => {
     }
 
     if (!MP_TOKEN) {
-      return res.status(500).json({ ok: false, mensagem: "Token do Mercado Pago não configurado no servidor." });
+      console.error('❌ ERRO CRÍTICO: Token do Mercado Pago ausente nas variáveis!');
+      return res.status(500).json({ ok: false, mensagem: "Token do Mercado Pago não configurado." });
     }
 
     // 2. Validação da existência do usuário no Banco de Dados
@@ -3022,7 +3023,7 @@ app.post("/api/pagamento", async (req, res) => {
       totalCalculado += itemCadastrado.price;
     }
 
-    // Tolerância para divergência de centavos no float
+    // Tolerância para divergência de centavos
     if (Math.abs(totalCalculado - Number(amount)) > 0.01) {
       return res.status(400).json({ ok: false, mensagem: "❌ O valor enviado não corresponde ao total dos itens!" });
     }
@@ -3038,14 +3039,16 @@ app.post("/api/pagamento", async (req, res) => {
         payer: {
           email: email,
           first_name: user
+        },
+        metadata: {
+          usuario: user,
+          items: items
         }
       };
 
       const response = await paymentClient.create({ body: paymentData });
-      const body = response && response.body ? response.body : response;
-      const txn = (body.point_of_interaction && body.point_of_interaction.transaction_data) ? body.point_of_interaction.transaction_data : {};
+      const txn = response?.point_of_interaction?.transaction_data || {};
 
-      // Registro do log da compra
       try {
         const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
         await compra.save();
@@ -3073,14 +3076,15 @@ app.post("/api/pagamento", async (req, res) => {
             type: "CPF",
             number: (req.body.cpf || "").replace(/\D/g, "") || "00000000000"
           }
+        },
+        metadata: {
+          usuario: user,
+          items: items
         }
       };
 
-      const response = await mercadopago.payment.create(paymentData);
-      const body = response && response.body ? response.body : response;
-      const url = body.point_of_interaction && body.point_of_interaction.transaction_data && body.point_of_interaction.transaction_data.external_resource_url
-        ? body.point_of_interaction.transaction_data.external_resource_url
-        : (body.transaction_details && body.transaction_details.external_resource_url) || null;
+      const response = await paymentClient.create({ body: paymentData });
+      const url = response?.point_of_interaction?.transaction_data?.external_resource_url || response?.transaction_details?.external_resource_url || null;
 
       try {
         const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
@@ -3102,6 +3106,10 @@ app.post("/api/pagamento", async (req, res) => {
           unit_price: CATALOGO[i.id].price
         })),
         payer: { email: email },
+        metadata: {
+          usuario: user,
+          items: items
+        },
         back_urls: {
           success: process.env.SUCCESS_URL || "https://example.com/success",
           failure: process.env.FAILURE_URL || "https://example.com/failure",
@@ -3110,7 +3118,7 @@ app.post("/api/pagamento", async (req, res) => {
         auto_return: "approved"
       };
 
-      const pref = await mercadopago.preferences.create(preference);
+      const pref = await preferenceClient.create({ body: preference });
 
       try {
         const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
@@ -3121,8 +3129,8 @@ app.post("/api/pagamento", async (req, res) => {
 
       return res.json({
         ok: true,
-        init_point: pref.body.init_point,
-        sandbox_init_point: pref.body.sandbox_init_point
+        init_point: pref.init_point,
+        sandbox_init_point: pref.sandbox_init_point
       });
     }
 
@@ -3139,32 +3147,35 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
   try {
     const { type, data } = req.body;
 
-    // Verifica se a notificação é de um pagamento
     if (type === 'payment' && data && data.id) {
-      // Busca os detalhes atualizados do pagamento na API do MP
-    const paymentResponse = await paymentClient.get({ id: data.id });
-      const payment = paymentResponse.body;
+      const payment = await paymentClient.get({ id: data.id });
 
-      // Se o pagamento foi APROVADO
       if (payment.status === 'approved') {
-        // Recupera os dados salvos nas métricas/metadados
         const usuarioNome = payment.metadata?.usuario;
         const itemsComprados = payment.metadata?.items;
 
         if (usuarioNome && itemsComprados) {
-          // Entrega os itens no banco de dados
           await aplicarRecompensas(usuarioNome, itemsComprados);
           console.log(`✅ Recompensas entregues com sucesso para ${usuarioNome}!`);
         }
       }
     }
 
-    // Responde 200 OK para o Mercado Pago saber que você recebeu a notificação
     res.sendStatus(200);
   } catch (err) {
     console.error('Erro ao processar Webhook do Mercado Pago:', err);
     res.sendStatus(500);
   }
+});
+
+app.get('/api/test-token', (req, res) => {
+  const tokenExiste = !!MP_TOKEN;
+  const inicioToken = MP_TOKEN ? MP_TOKEN.substring(0, 10) + '...' : 'Nenhum';
+  
+  return res.json({
+    tokenConfigurado: tokenExiste,
+    previaToken: inicioToken
+  });
 });
 
 app.listen(PORT, () => {
