@@ -3018,7 +3018,7 @@ app.post("/api/pagamento", async (req, res) => {
         usuario: user,
         items: items
       },
-      notification_url: WEBHOOK_URL,
+      notification_url: "https://login-nqot.onrender.com/api/webhooks/mercadopago",
       back_urls: {
         success: process.env.SUCCESS_URL || "https://neeexusbr.github.io/loja?status=sucesso",
         failure: process.env.FAILURE_URL || "https://neeexusbr.github.io/loja?status=erro",
