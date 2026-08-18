@@ -2909,7 +2909,6 @@ app.get("/user/alerts", autenticar, async (req, res) => {
   }
 });
 
-// Catálogo unificado de preços e tipos
 const CATALOGO = {
   // Gemas
   "100-gemas": { price: 1, type: "gemas", quantidade: 100 },
@@ -2926,10 +2925,10 @@ const CATALOGO = {
   "250-giros": { price: 15, type: "giros", quantidade: 250 },
   "500-giros": { price: 28, type: "giros", quantidade: 500 },
   
-  // Itens
+  // Itens (Ajustados para bater com o HTML)
   "cor-comum": { price: 1, type: "item" },
-  "cor-especial": { price: 1, type: "item" },
-  "custom-tag": { price: 1, type: "item" },
+  "cor-especial": { price: 2.5, type: "item" }, // Alterado de 1 para 2.5
+  "custom-tag": { price: 2.5, type: "item" },   // Alterado de 1 para 2.5
   "premium-xp": { price: 5, type: "item" },
   "ultra-xp": { price: 10, type: "item" },
   
@@ -2988,13 +2987,12 @@ async function aplicarRecompensas(nomeUsuario, items) {
 }
 
 // ROTA DE PAGAMENTO
-// ROTA DE PAGAMENTO
+// ROTA DE PAGAMENTO (Checkout Pro para TODOS os métodos)
 app.post("/api/pagamento", async (req, res) => {
   try {
-    const { user, email, amount, method, items, cpf } = req.body || {};
+    const { user, email, amount, items } = req.body || {};
 
-    // 1. Validação de parâmetros
-    if (!user || !email || !amount || !method || !items || !Array.isArray(items) || items.length === 0) {
+    if (!user || !email || !amount || !items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ ok: false, mensagem: "❌ Informações obrigatórias ausentes!" });
     }
 
@@ -3002,124 +3000,50 @@ app.post("/api/pagamento", async (req, res) => {
       return res.status(500).json({ ok: false, mensagem: "Token do Mercado Pago não configurado." });
     }
 
-    // 2. Validação do usuário
     const usuarioExiste = await Usuario.exists({ nome: user });
     if (!usuarioExiste) {
       return res.status(404).json({ ok: false, mensagem: "❌ Usuário Não Existe" });
     }
 
-    // 3. Validação do valor total
-    let totalCalculado = 0;
-    for (const item of items) {
-      const itemCadastrado = CATALOGO[item.id];
-      if (!itemCadastrado) {
-        return res.status(400).json({ ok: false, mensagem: `❌ Item inválido: ${item.id}` });
-      }
-      totalCalculado += itemCadastrado.price;
-    }
+    // 1. Cria a Preference do Checkout Pro
+    const preference = {
+      items: items.map(i => ({
+        title: CATALOGO[i.id]?.title || i.id,
+        quantity: 1,
+        currency_id: "BRL",
+        unit_price: CATALOGO[i.id].price
+      })),
+      payer: { email: email },
+      metadata: {
+        usuario: user,
+        items: items
+      },
+      notification_url: WEBHOOK_URL,
+      back_urls: {
+        success: process.env.SUCCESS_URL || "https://neeexusbr.github.io/loja?status=sucesso",
+        failure: process.env.FAILURE_URL || "https://neeexusbr.github.io/loja?status=erro",
+        pending: process.env.PENDING_URL || "https://neeexusbr.github.io/loja?status=pendente"
+      },
+      auto_return: "approved"
+    };
 
-    if (Math.abs(totalCalculado - Number(amount)) > 0.01) {
-      return res.status(400).json({ ok: false, mensagem: "❌ O valor não corresponde ao total dos itens!" });
-    }
+    const pref = await preferenceClient.create({ body: preference });
 
-    const descricaoCompra = items.map(i => i.id).join(", ");
+    // Salva a compra pendente no banco
+    await Compra.create({ 
+      usuario: user, 
+      itemId: items[0].id, 
+      itemNome: items.map(i => i.id).join(", "), 
+      preco: Number(amount),
+      status: "pendente"
+    });
 
-    // 4. Fluxo PIX
-    if (method === "pix") {
-      const paymentData = {
-        transaction_amount: Number(amount),
-        description: descricaoCompra,
-        payment_method_id: "pix",
-        payer: {
-          email: email,
-          first_name: user
-        },
-        metadata: {
-          usuario: user,
-          items: items
-        }
-      };
-
-      const response = await paymentClient.create({ body: paymentData });
-      const txn = response?.point_of_interaction?.transaction_data || {};
-
-      await Compra.create({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
-
-      return res.json({
-        ok: true,
-        qrCodeBase64: txn.qr_code_base64 || null,
-        pixCopiaECola: txn.qr_code || txn.qr_code_text || null
-      });
-    }
-
-    // 5. Fluxo BOLETO
-    if (method === "boleto") {
-      const cpfLimpo = (cpf || "").replace(/\D/g, "");
-      if (cpfLimpo.length !== 11) {
-        return res.status(400).json({ ok: false, mensagem: "❌ CPF inválido para geração de Boleto." });
-      }
-
-      const paymentData = {
-        transaction_amount: Number(amount),
-        description: descricaoCompra,
-        payment_method_id: "bolbradesco",
-        payer: {
-          email: email,
-          first_name: user,
-          identification: {
-            type: "CPF",
-            number: cpfLimpo
-          }
-        },
-        metadata: {
-          usuario: user,
-          items: items
-        }
-      };
-
-      const response = await paymentClient.create({ body: paymentData });
-      const url = response?.point_of_interaction?.transaction_data?.external_resource_url || null;
-
-      await Compra.create({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
-
-      return res.json({ ok: true, boletoUrl: url });
-    }
-
-    // 6. Fluxo CARTÃO (Preference Checkout)
-    if (method === "card") {
-      const preference = {
-        items: items.map(i => ({
-          title: i.id,
-          quantity: 1,
-          currency_id: "BRL",
-          unit_price: CATALOGO[i.id].price
-        })),
-        payer: { email: email },
-        metadata: {
-          usuario: user,
-          items: items
-        },
-        notification_url: `${process.env.SERVER_URL || 'https://login-nqot.onrender.com'}/api/webhooks/mercadopago`,
-        back_urls: {
-          success: process.env.SUCCESS_URL || "https://neeexusbr.github.io/loja?status=sucesso",
-          failure: process.env.FAILURE_URL || "https://neeexusbr.github.io/loja?status=falhou",
-          pending: process.env.PENDING_URL || "https://neeexusbr.github.io/loja?status=pendente"
-        },
-        auto_return: "approved"
-      };
-
-      const pref = await preferenceClient.create({ body: preference });
-
-      await Compra.create({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
-
-      return res.json({
-        ok: true,
-        init_point: pref.init_point,
-        sandbox_init_point: pref.sandbox_init_point
-      });
-    }
-
-    return res.status(400).json({ ok: false, mensagem: "Método de pagamento não suportado." });
+    // Retorna o link de redirecionamento do Mercado Pago
+    return res.json({
+      ok: true,
+      init_point: pref.init_point,
+      sandbox_init_point: pref.sandbox_init_point
+    });
 
   } catch (err) {
     console.error("Erro na rota /api/pagamento:", err);
