@@ -2988,39 +2988,38 @@ async function aplicarRecompensas(nomeUsuario, items) {
 }
 
 // ROTA DE PAGAMENTO
+// ROTA DE PAGAMENTO
 app.post("/api/pagamento", async (req, res) => {
   try {
-    const { user, email, amount, method, items } = req.body || {};
+    const { user, email, amount, method, items, cpf } = req.body || {};
 
-    // 1. Validação de presença de campos obrigatórios
+    // 1. Validação de parâmetros
     if (!user || !email || !amount || !method || !items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ ok: false, mensagem: "❌ Informações e parâmetros obrigatórios ausentes!" });
+      return res.status(400).json({ ok: false, mensagem: "❌ Informações obrigatórias ausentes!" });
     }
 
     if (!MP_TOKEN) {
-      console.error('❌ ERRO CRÍTICO: Token do Mercado Pago ausente nas variáveis!');
       return res.status(500).json({ ok: false, mensagem: "Token do Mercado Pago não configurado." });
     }
 
-    // 2. Validação da existência do usuário no Banco de Dados
+    // 2. Validação do usuário
     const usuarioExiste = await Usuario.exists({ nome: user });
     if (!usuarioExiste) {
       return res.status(404).json({ ok: false, mensagem: "❌ Usuário Não Existe" });
     }
 
-    // 3. Validação e soma dos preços contra a tabela oficial
+    // 3. Validação do valor total
     let totalCalculado = 0;
     for (const item of items) {
       const itemCadastrado = CATALOGO[item.id];
       if (!itemCadastrado) {
-        return res.status(400).json({ ok: false, mensagem: `❌ Item inválido ou não encontrado: ${item.id}` });
+        return res.status(400).json({ ok: false, mensagem: `❌ Item inválido: ${item.id}` });
       }
       totalCalculado += itemCadastrado.price;
     }
 
-    // Tolerância para divergência de centavos
     if (Math.abs(totalCalculado - Number(amount)) > 0.01) {
-      return res.status(400).json({ ok: false, mensagem: "❌ O valor enviado não corresponde ao total dos itens!" });
+      return res.status(400).json({ ok: false, mensagem: "❌ O valor não corresponde ao total dos itens!" });
     }
 
     const descricaoCompra = items.map(i => i.id).join(", ");
@@ -3044,12 +3043,7 @@ app.post("/api/pagamento", async (req, res) => {
       const response = await paymentClient.create({ body: paymentData });
       const txn = response?.point_of_interaction?.transaction_data || {};
 
-      try {
-        const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
-        await compra.save();
-      } catch (e) {
-        console.warn("Não foi possível salvar log de Compra:", e.message);
-      }
+      await Compra.create({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
 
       return res.json({
         ok: true,
@@ -3060,6 +3054,11 @@ app.post("/api/pagamento", async (req, res) => {
 
     // 5. Fluxo BOLETO
     if (method === "boleto") {
+      const cpfLimpo = (cpf || "").replace(/\D/g, "");
+      if (cpfLimpo.length !== 11) {
+        return res.status(400).json({ ok: false, mensagem: "❌ CPF inválido para geração de Boleto." });
+      }
+
       const paymentData = {
         transaction_amount: Number(amount),
         description: descricaoCompra,
@@ -3069,7 +3068,7 @@ app.post("/api/pagamento", async (req, res) => {
           first_name: user,
           identification: {
             type: "CPF",
-            number: (req.body.cpf || "").replace(/\D/g, "") || "00000000000"
+            number: cpfLimpo
           }
         },
         metadata: {
@@ -3079,19 +3078,14 @@ app.post("/api/pagamento", async (req, res) => {
       };
 
       const response = await paymentClient.create({ body: paymentData });
-      const url = response?.point_of_interaction?.transaction_data?.external_resource_url || response?.transaction_details?.external_resource_url || null;
+      const url = response?.point_of_interaction?.transaction_data?.external_resource_url || null;
 
-      try {
-        const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
-        await compra.save();
-      } catch (e) {
-        console.warn("Não foi possível salvar log de Compra:", e.message);
-      }
+      await Compra.create({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
 
       return res.json({ ok: true, boletoUrl: url });
     }
 
-    // 6. Fluxo CARTÃO (Gera Preference do Checkout)
+    // 6. Fluxo CARTÃO (Preference Checkout)
     if (method === "card") {
       const preference = {
         items: items.map(i => ({
@@ -3105,22 +3099,18 @@ app.post("/api/pagamento", async (req, res) => {
           usuario: user,
           items: items
         },
+        notification_url: `${process.env.SERVER_URL || 'https://login-nqot.onrender.com'}/api/webhooks/mercadopago`,
         back_urls: {
-          success: process.env.SUCCESS_URL || "https://example.com/success",
-          failure: process.env.FAILURE_URL || "https://example.com/failure",
-          pending: process.env.PENDING_URL || "https://example.com/pending"
+          success: process.env.SUCCESS_URL || "https://neeexusbr.github.io/loja?status=sucesso",
+          failure: process.env.FAILURE_URL || "https://neeexusbr.github.io/loja?status=falhou",
+          pending: process.env.PENDING_URL || "https://neeexusbr.github.io/loja?status=pendente"
         },
         auto_return: "approved"
       };
 
       const pref = await preferenceClient.create({ body: preference });
 
-      try {
-        const compra = new Compra({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
-        await compra.save();
-      } catch (e) {
-        console.warn("Não foi possível salvar log de Compra:", e.message);
-      }
+      await Compra.create({ usuario: user, itemId: items[0].id, itemNome: descricaoCompra, preco: Number(amount) });
 
       return res.json({
         ok: true,
@@ -3137,21 +3127,24 @@ app.post("/api/pagamento", async (req, res) => {
   }
 });
 
-// Rota para receber notificações assíncronas do Mercado Pago
+// WEBHOOK CORRIGIDO
 app.post('/api/webhooks/mercadopago', async (req, res) => {
   try {
-    const { type, data } = req.body;
+    const { type, data, action } = req.body || {};
 
-    if (type === 'payment' && data && data.id) {
-      const payment = await paymentClient.get({ id: data.id });
+    // Obtém o ID do pagamento dependendo do formato enviado pelo Mercado Pago
+    const paymentId = data?.id || (action === 'payment.created' ? req.query?.['data.id'] : null);
 
-      if (payment.status === 'approved') {
+    if (paymentId) {
+      const payment = await paymentClient.get({ id: paymentId });
+
+      if (payment && payment.status === 'approved') {
         const usuarioNome = payment.metadata?.usuario;
         const itemsComprados = payment.metadata?.items;
 
-        if (usuarioNome && itemsComprados) {
+        if (usuarioNome && Array.isArray(itemsComprados)) {
           await aplicarRecompensas(usuarioNome, itemsComprados);
-          console.log(`✅ Recompensas entregues com sucesso para ${usuarioNome}!`);
+          console.log(`✅ Recompensas creditadas com sucesso para ${usuarioNome}!`);
         }
       }
     }
@@ -3159,9 +3152,10 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
     res.sendStatus(200);
   } catch (err) {
     console.error('Erro ao processar Webhook do Mercado Pago:', err);
-    res.sendStatus(500);
+    res.sendStatus(200); // Retorna 200 para evitar que o Mercado Pago fique reenviando requisições com erro
   }
 });
+
 
 app.get('/api/test-token', (req, res) => {
   const tokenExiste = !!MP_TOKEN;
