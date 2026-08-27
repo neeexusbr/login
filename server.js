@@ -1642,6 +1642,100 @@ app.get("/achievements-usuario", autenticar, async (req, res) => {
   }
 });
 
+// === ENDPOINT PARA VERIFICAR ITEM ===
+app.post("/verificar-item", autenticar, async (req, res) => {
+    try {
+        const { item } = req.body;
+
+        if (!item) {
+            return res.status(400).json({
+                ok: false,
+                mensagem: "Item não informado!"
+            });
+        }
+
+        const usuario = await Usuario.findOne({
+            nome: req.usuario.nome
+        });
+
+        if (!usuario) {
+            return res.status(404).json({
+                ok: false,
+                mensagem: "Usuário não encontrado!"
+            });
+        }
+
+        const possuiItem = usuario.itensComprados?.includes(item);
+
+        if (possuiItem) {
+            return res.json({
+                ok: true,
+                mensagem: "Item encontrado!"
+            });
+        }
+
+        return res.status(403).json({
+            ok: false,
+            mensagem: "Usuário não possui este item!"
+        });
+
+    } catch (err) {
+        console.error("Erro ao verificar item:", err);
+
+        return res.status(500).json({
+            ok: false,
+            mensagem: "Erro ao procurar Item: " + err.message
+        });
+    }
+});
+
+
+// === ENDPOINT PARA VERIFICAR ITENS EM MASSA ===
+app.post("/verificar-itens", autenticar, async (req, res) => {
+    try {
+        const { itens } = req.body;
+
+        if (!Array.isArray(itens)) {
+            return res.status(400).json({
+                ok: false,
+                mensagem: "Lista de itens inválida!"
+            });
+        }
+
+        const usuario = await Usuario.findOne({
+            nome: req.usuario.nome
+        });
+
+        if (!usuario) {
+            return res.status(404).json({
+                ok: false,
+                mensagem: "Usuário não encontrado!"
+            });
+        }
+
+        const itensComprados = usuario.itensComprados || [];
+
+        // Descobre quais itens do localStorage
+        // não estão mais no database
+        const itensInvalidos = itens.filter(
+            item => !itensComprados.includes(item)
+        );
+
+        return res.json({
+            ok: true,
+            itensInvalidos
+        });
+
+    } catch (err) {
+        console.error("Erro ao sincronizar itens:", err);
+
+        return res.status(500).json({
+            ok: false,
+            mensagem: "Erro ao verificar itens: " + err.message
+        });
+    }
+});
+
 const RANK_THRESHOLDS = [
   0,
   100,
