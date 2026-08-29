@@ -1931,7 +1931,8 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
       return res.status(400).json({ ok: false, mensagem: validacao.mensagem });
     }
 
-    const isWeekEnd = new Date().getDay() == 6 || new Date().getDay() == 7
+    const diaSemana = new Date().getDay();
+const isWeekEnd = (diaSemana === 0 || diaSemana === 6);
 
     let multiplicador = 1
     
