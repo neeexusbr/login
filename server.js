@@ -1238,6 +1238,7 @@ app.get("/leaderboard", async (req, res) => {
         rank: user.rank || 1,
         isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
+        hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
         premio: premio,
         posicao: index + 1
       };
@@ -1303,6 +1304,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         isAdmin: !!user.isAdmin,
         xp: user.xp || 0, // <--- Incluído no retorno para o front-end conseguir exibir
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
+        hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
         premio: premio,
         posicao: index + 1
       };
@@ -1346,6 +1348,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
         rank: user.rank || 1,
         isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
+        hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
         premio: premio,
         posicao: index + 1
       };
@@ -1391,6 +1394,7 @@ app.get("/leaderboard/giros", async (req, res) => {
         rank: user.rank || 1,
         isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
+        hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
         premio: premio,
         posicao: index + 1
       };
@@ -1840,7 +1844,13 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
+    const isWeekEnd = new Date().getDay() == 6 || new Date().getDay() == 7
+
     let multiplicador = 1;
+    
+    if (isWeekEnd) {
+      multiplicador *= 2;
+    }
 
 if (usuario.itensComprados.includes('premium-xp')) {
     multiplicador *= 2;
@@ -1919,14 +1929,21 @@ app.post("/sincronizar-moedas", autenticar, async (req, res) => {
       console.warn(`[SYNC] Bloqueado para ${req.usuario.nome}: ${validacao.mensagem}`);
       return res.status(400).json({ ok: false, mensagem: validacao.mensagem });
     }
+
+    const isWeekEnd = new Date().getDay() == 6 || new Date().getDay() == 7
+
+    let multiplicador = 1
     
     // Verifica se tem o ultra premium
-    
     if (req.usuario.itensComprados.includes('ultra-xp')) {
-      usuario.moedas = moedAsInt * 2;
-    } else {
-      usuario.moedas = moedAsInt;
+      multiplicador = 2
+    } 
+
+    if (isWeekEnd) {
+      multiplicador = multiplicador * 2
     }
+
+    usuario.moedas = moedAsInt * multiplicador;
     
     await usuario.save();
 
