@@ -1844,7 +1844,8 @@ app.post("/atualizar-xp", autenticar, async (req, res) => {
       return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
     }
 
-    const isWeekEnd = new Date().getDay() == 6 || new Date().getDay() == 7
+    const diaSemana = new Date().getDay();
+const isWeekEnd = (diaSemana === 0 || diaSemana === 6);
 
     let multiplicador = 1;
     
