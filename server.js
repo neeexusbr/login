@@ -1981,7 +1981,7 @@ app.post("/sincronizar-dados-simples", autenticar, async (req, res) => {
       if (!validacaoMoedas.ok) {
         return res.status(400).json({ ok: false, mensagem: validacaoMoedas.mensagem });
       }
-
+      usuario.moedas = moedasInt;
     }
     if (playtime !== undefined) {
       const playtimeInt = normalizarInteiro(playtime);
