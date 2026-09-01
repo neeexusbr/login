@@ -98,6 +98,8 @@ const Usuario = mongoose.model('Usuario', new mongoose.Schema({
   rank: { type: Number, default: 1 }, // Rank do usuário (1-30)
   xp: { type: Number, default: 0 }, // Experiência atual do usuário
   premiumXp: { type: Boolean, default: false }, // Premium: dobra XP ganhado
+  achievements: [String], // Lista de conquistas desbloqueadas (ach-detetive, ach-sortudo, etc)
+  achievementsPublic: [String], // Lista de conquistas que o usuário quer compartilhar
   banidoAte: { type: Date, default: null },
   banMotivo: { type: String, default: '' }
   ,
@@ -1210,7 +1212,7 @@ app.post("/admin/remover-head-admin", autenticar, verificarDogue, async (req, re
 // === ENDPOINTS DE LEADERBOARD ===
 app.get("/leaderboard", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, tempo_jogo: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, rank: 1, isAdmin: 1, itensComprados: 1, achievementsPublic: 1, _id: 0 })
       .sort({ tempo_jogo: -1 })
       .limit(20)
       .lean(); // Converter para objeto puro do JavaScript
@@ -1240,6 +1242,7 @@ app.get("/leaderboard", async (req, res) => {
         isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
+        achievementsPublic: user.achievementsPublic || [],
         premio: premio,
         posicao: index + 1
       };
@@ -1275,6 +1278,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         xp: 1,
         isAdmin: 1,
         itensComprados: 1,
+        achievementsPublic: 1,
         _id: 0 
       })
       .sort({ xp: -1 }) // <--- Alterado de rank para xp
@@ -1307,6 +1311,7 @@ app.get("/leaderboard/rank", async (req, res) => {
         xp: user.xp || 0, // <--- Incluído no retorno para o front-end conseguir exibir
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
+        achievementsPublic: user.achievementsPublic || [],
         premio: premio,
         posicao: index + 1
       };
@@ -1322,7 +1327,7 @@ app.get("/leaderboard/rank", async (req, res) => {
 // === LEADERBOARD DE MOEDAS ===
 app.get("/leaderboard/moedas", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, moedas: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, rank: 1, isAdmin: 1, itensComprados: 1, achievementsPublic: 1, _id: 0 })
       .sort({ moedas: -1 })
       .limit(20)
       .lean();
@@ -1352,6 +1357,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
         isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
+        achievementsPublic: user.achievementsPublic || [],
         premio: premio,
         posicao: index + 1
       };
@@ -1368,7 +1374,7 @@ app.get("/leaderboard/moedas", async (req, res) => {
 // === LEADERBOARD DE GIROS ===
 app.get("/leaderboard/giros", async (req, res) => {
   try {
-    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, isAdmin: 1, itensComprados: 1, _id: 0 })
+    const usuarios = await Usuario.find({}, { nome: 1, spins: 1, foto_perfil: 1, bio: 1, infiniteCoins: 1, infiniteSpins: 1, lastDailyRewardDate: 1, tagPersonalizada: 1, corTagPersonalizada: 1, tipoCorTag: 1, corBordaPerfil: 1, idCorBordaPerfil: 1, tempo_jogo: 1, moedas: 1, rank: 1, isAdmin: 1, itensComprados: 1, achievementsPublic: 1, _id: 0 })
       .sort({ spins: -1 })
       .limit(20)
       .lean();
@@ -1399,6 +1405,7 @@ app.get("/leaderboard/giros", async (req, res) => {
         isAdmin: !!user.isAdmin,
         hasPremium: !!(user.itensComprados && user.itensComprados.includes('premium-xp')),
         hasUltraPremium: !!(user.itensComprados && user.itensComprados.includes('ultra-xp')),
+        achievementsPublic: user.achievementsPublic || [],
         premio: premio,
         posicao: index + 1
       };
@@ -1647,6 +1654,91 @@ app.get("/achievements-usuario", autenticar, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ ok: false, mensagem: "Erro ao obter achievements: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA SINCRONIZAR CONQUISTAS ===
+app.post("/sincronizar-conquistas", autenticar, async (req, res) => {
+  try {
+    const { achievements } = req.body;
+
+    if (!Array.isArray(achievements)) {
+      return res.status(400).json({ ok: false, mensagem: "Conquistas deve ser um array" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    usuario.achievements = achievements;
+    await usuario.save();
+
+    console.log(`[ACHIEVEMENTS] ✅ Conquistas sincronizadas para ${req.usuario.nome}:`, achievements);
+    res.json({ 
+      ok: true, 
+      mensagem: "Conquistas sincronizadas com sucesso!",
+      achievements: usuario.achievements
+    });
+  } catch (err) {
+    console.error('[ACHIEVEMENTS] Erro:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao sincronizar conquistas: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA DEFINIR CONQUISTAS PÚBLICAS ===
+app.post("/definir-conquistas-publicas", autenticar, async (req, res) => {
+  try {
+    const { achievementsPublic } = req.body;
+
+    if (!Array.isArray(achievementsPublic)) {
+      return res.status(400).json({ ok: false, mensagem: "achievementsPublic deve ser um array" });
+    }
+
+    const usuario = await Usuario.findOne({ nome: req.usuario.nome });
+    if (!usuario) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    // Validar que as conquistas públicas estão na lista de conquistas desbloqueadas
+    const invalidas = achievementsPublic.filter(ach => !usuario.achievements || !usuario.achievements.includes(ach));
+    if (invalidas.length > 0) {
+      return res.status(400).json({ ok: false, mensagem: `Você não desbloqueou: ${invalidas.join(', ')}` });
+    }
+
+    usuario.achievementsPublic = achievementsPublic;
+    await usuario.save();
+
+    console.log(`[ACHIEVEMENTS-PUBLIC] ✅ Conquistas públicas atualizadas para ${req.usuario.nome}:`, achievementsPublic);
+    res.json({ 
+      ok: true, 
+      mensagem: "Conquistas públicas atualizadas!",
+      achievementsPublic: usuario.achievementsPublic
+    });
+  } catch (err) {
+    console.error('[ACHIEVEMENTS-PUBLIC] Erro:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao atualizar conquistas públicas: " + err.message });
+  }
+});
+
+// === ENDPOINT PARA OBTER CONQUISTAS PÚBLICAS DE UM USUÁRIO ===
+app.get("/conquistas-publicas/:usuario", async (req, res) => {
+  try {
+    const { usuario } = req.params;
+
+    const usuarioData = await Usuario.findOne({ nome: usuario }, { achievementsPublic: 1, _id: 0 });
+    
+    if (!usuarioData) {
+      return res.status(404).json({ ok: false, mensagem: "Usuário não encontrado!" });
+    }
+
+    res.json({ 
+      ok: true, 
+      achievementsPublic: usuarioData.achievementsPublic || []
+    });
+  } catch (err) {
+    console.error('[ACHIEVEMENTS-PUBLIC-GET] Erro:', err);
+    res.status(500).json({ ok: false, mensagem: "Erro ao obter conquistas públicas: " + err.message });
   }
 });
 
