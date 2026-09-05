@@ -145,6 +145,13 @@ const Solicitacao = mongoose.model('Solicitacao', new mongoose.Schema({
 // Modelo de códigos promocionais
 const CodigoPromocional = mongoose.model('CodigoPromocional', new mongoose.Schema({
   codigo: { type: String, required: true, unique: true, uppercase: true, trim: true },
+  recompensas: [{
+    tipo: { type: String, enum: ['moedas', 'item', 'spins', 'jogo', 'tempo-jogo'], required: true },
+    valor: { type: Number, default: 0 },
+    itemId: { type: String, default: '' },
+    itemNome: { type: String, default: '' },
+    jogoId: { type: String, default: '' }
+  }],
   descricao: { type: String, default: '' },
   tipoRecompensa: { type: String, enum: ['moedas', 'item', 'spins', 'jogo', 'tempo-jogo'], default: 'moedas' },
   valor: { type: Number, default: 0 },
@@ -630,27 +637,37 @@ app.post("/admin/codigos/criar", autenticar, verificarDogue, async (req, res) =>
       usoUnicoPorPessoa
     } = req.body;
 
+    const tiposPermitidos = ['moedas', 'item', 'spins', 'jogo', 'tempo-jogo'];
+    const recompensasRecebidas = Array.isArray(req.body.recompensas) && req.body.recompensas.length > 0
+      ? req.body.recompensas
+      : [{ tipo: tipoRecompensa, valor, itemId, itemNome, jogoId }];
+    const recompensas = recompensasRecebidas.map((recompensa) => ({
+      tipo: recompensa.tipo,
+      valor: Number(recompensa.valor || 0),
+      itemId: String(recompensa.itemId || '').trim(),
+      itemNome: String(recompensa.itemNome || recompensa.itemId || '').trim(),
+      jogoId: String(recompensa.jogoId || '').trim()
+    }));
+
     const codigoNormalizado = String(codigo || '').trim().toUpperCase();
     if (!codigoNormalizado) {
       return res.status(400).json({ ok: false, mensagem: "Informe um código válido." });
     }
 
-    const tiposPermitidos = ['moedas', 'item', 'spins', 'jogo', 'tempo-jogo'];
-    if (!tiposPermitidos.includes(tipoRecompensa)) {
+    if (recompensas.length === 0 || recompensas.some((recompensa) => !tiposPermitidos.includes(recompensa.tipo))) {
       return res.status(400).json({ ok: false, mensagem: "Tipo de recompensa inválido." });
     }
 
-    const valorNumero = Number(valor || 0);
-    if (!Number.isFinite(valorNumero) || valorNumero <= 0) {
-      return res.status(400).json({ ok: false, mensagem: "O valor da recompensa precisa ser maior que zero." });
-    }
-
-    if (tipoRecompensa === 'item' && !itemId) {
-      return res.status(400).json({ ok: false, mensagem: "Informe o ID do item para este código." });
-    }
-
-    if (tipoRecompensa === 'jogo' && !jogoId) {
-      return res.status(400).json({ ok: false, mensagem: "Informe o ID do jogo para este código." });
+    for (const recompensa of recompensas) {
+      if (['moedas', 'spins', 'tempo-jogo'].includes(recompensa.tipo) && (!Number.isFinite(recompensa.valor) || recompensa.valor <= 0)) {
+        return res.status(400).json({ ok: false, mensagem: "O valor de cada recompensa precisa ser maior que zero." });
+      }
+      if (recompensa.tipo === 'item' && !recompensa.itemId) {
+        return res.status(400).json({ ok: false, mensagem: "Informe o ID do item para cada recompensa de item." });
+      }
+      if (recompensa.tipo === 'jogo' && !recompensa.jogoId) {
+        return res.status(400).json({ ok: false, mensagem: "Informe o ID do jogo para cada recompensa de jogo." });
+      }
     }
 
     const existente = await CodigoPromocional.findOne({ codigo: codigoNormalizado });
@@ -665,12 +682,13 @@ app.post("/admin/codigos/criar", autenticar, verificarDogue, async (req, res) =>
 
     const novoCodigo = new CodigoPromocional({
       codigo: codigoNormalizado,
+      recompensas,
       descricao: descricao || '',
-      tipoRecompensa,
-      valor: valorNumero,
-      itemId: itemId || '',
-      itemNome: itemNome || itemId || '',
-      jogoId: jogoId || '',
+      tipoRecompensa: recompensas[0].tipo,
+      valor: recompensas[0].valor,
+      itemId: recompensas[0].itemId,
+      itemNome: recompensas[0].itemNome,
+      jogoId: recompensas[0].jogoId,
       dataExpiracao: codigoExpiracao,
       maxUsos: Math.max(1, Number(maxUsos || 1)),
       usoUnicoPorPessoa: Boolean(usoUnicoPorPessoa),
@@ -732,26 +750,38 @@ app.post("/usar-codigo", autenticar, async (req, res) => {
       return res.status(400).json({ ok: false, mensagem: "Você já utilizou este código." });
     }
 
-    switch (codigoPromocional.tipoRecompensa) {
-      case 'moedas':
-        usuario.moedas += Number(codigoPromocional.valor || 0);
-        break;
-      case 'item':
-        if (!usuario.itensComprados.includes(codigoPromocional.itemId)) {
-          usuario.itensComprados.push(codigoPromocional.itemId);
-        }
-        break;
-      case 'spins':
-        usuario.spins += Number(codigoPromocional.valor || 0);
-        break;
-      case 'jogo':
-        if (!usuario.jogosSecretos.includes(codigoPromocional.jogoId)) {
-          usuario.jogosSecretos.push(codigoPromocional.jogoId);
-        }
-        break;
-      case 'tempo-jogo':
-        usuario.tempo_jogo += Number(codigoPromocional.valor || 0);
-        break;
+    const recompensas = Array.isArray(codigoPromocional.recompensas) && codigoPromocional.recompensas.length > 0
+      ? codigoPromocional.recompensas
+      : [{
+          tipo: codigoPromocional.tipoRecompensa,
+          valor: codigoPromocional.valor,
+          itemId: codigoPromocional.itemId,
+          itemNome: codigoPromocional.itemNome,
+          jogoId: codigoPromocional.jogoId
+        }];
+
+    for (const recompensa of recompensas) {
+      switch (recompensa.tipo) {
+        case 'moedas':
+          usuario.moedas += Number(recompensa.valor || 0);
+          break;
+        case 'item':
+          if (!usuario.itensComprados.includes(recompensa.itemId)) {
+            usuario.itensComprados.push(recompensa.itemId);
+          }
+          break;
+        case 'spins':
+          usuario.spins += Number(recompensa.valor || 0);
+          break;
+        case 'jogo':
+          if (!usuario.jogosSecretos.includes(recompensa.jogoId)) {
+            usuario.jogosSecretos.push(recompensa.jogoId);
+          }
+          break;
+        case 'tempo-jogo':
+          usuario.tempo_jogo += Number(recompensa.valor || 0);
+          break;
+      }
     }
 
     codigoPromocional.usosAtuais += 1;
@@ -765,6 +795,12 @@ app.post("/usar-codigo", autenticar, async (req, res) => {
     res.json({
       ok: true,
       mensagem: "Código aplicado com sucesso!",
+      recompensas: recompensas.map((recompensa) => ({
+        tipo: recompensa.tipo,
+        valor: recompensa.valor,
+        itemId: recompensa.itemId,
+        jogoId: recompensa.jogoId
+      })),
       recompensa: {
         tipo: codigoPromocional.tipoRecompensa,
         valor: codigoPromocional.valor,
